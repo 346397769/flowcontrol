@@ -6,32 +6,23 @@ import com.example.flowcontrol.entity.TestRsp;
 import com.example.flowcontrol.properties.PublicProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import java.util.Timer;
-import java.util.TimerTask;
 
 @RestController
 public class FlowTestController {
     private static final Logger log = LoggerFactory.getLogger(FlowTestController.class);
     private static CuratorClient curatorClient;
-    private static Timer timer = new Timer();
+    private static boolean zkInit = false;
 
-    /**
-     * 这个static块里面的代码是按顺序来的，不能修改顺序，否则会造成错误
-     */
     static {
         curatorClient = CuratorClient.getCuratorClient();
-        //调用队列的自处理任务
-        new Thread(curatorClient).start();
-        //设置一个timer每隔一段时间设置zk node的值为0
-        timer.schedule(new TimerTask() {
-            public void run() {
-    //            log.info("超过"+PublicProperties.MAX_INTERVAL_MS+"毫秒 设置节点为0......");
-                curatorClient.setZkNodeValue0();
-//                log.info(PublicProperties.MAX_INTERVAL_MS+"毫秒时间到，将节点值设置为0成功......");
-            }
-        }, 5000,PublicProperties.MAX_INTERVAL_MS);
+        zkInit = curatorClient.initConnect(PublicProperties.CONNECT_ZK_URL_PORT);
+        if (zkInit){
+            //如果连接成功，那么开始流量控制
+            curatorClient.flClrStart();
+        }
     }
 
     @RequestMapping(value = "/flowTest")
@@ -44,10 +35,10 @@ public class FlowTestController {
             rspInfo.setDesc(PublicProperties.MAX_VALUE+"毫秒内访问超过最大限制,拒绝访问！！！");
             log.error(PublicProperties.MAX_VALUE+"毫秒内访问超过最大限制，拒绝访问！！！");
         }
-        rspInfo.setZkPath(curatorClient.getKidsPathUnderRoot());
-        rspInfo.setConnectZkUrlPort(curatorClient.getConnectZkUrlPort());
+//        rspInfo.setZkPath(curatorClient.getKidsPathUnderRoot());
+//        rspInfo.setConnectZkUrlPort(curatorClient.getConnectZkUrlPort());
         rspInfo.setMaxNum(PublicProperties.MAX_VALUE);
-        rspInfo.setCurrentNum(curatorClient.getZkServerCurrentNumL());
+//        rspInfo.setCurrentNum(curatorClient.getZkServerCurrentNumL());
 //        log.info(rspInfo.toString());
         return rspInfo;
     }
