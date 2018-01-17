@@ -5,16 +5,9 @@ import com.example.flowcontrol.utils.IntLong2BytesUtil;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
-import org.apache.curator.framework.recipes.cache.ChildData;
-import org.apache.curator.framework.recipes.cache.TreeCache;
-import org.apache.curator.framework.recipes.cache.TreeCacheEvent;
-import org.apache.curator.framework.recipes.cache.TreeCacheListener;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.framework.state.ConnectionStateListener;
-import org.apache.curator.retry.ExponentialBackoffRetry;
-import org.apache.curator.retry.RetryNTimes;
-import org.apache.curator.retry.RetryOneTime;
-import org.apache.curator.retry.RetryUntilElapsed;
+import org.apache.curator.retry.*;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs;
@@ -44,18 +37,24 @@ public class CuratorClient{
 
     //当前保存的自己的访问数量
 //    private static Long myNum = 0L;
-    AtomicInteger myNum = new AtomicInteger(0);
+    private static AtomicInteger myNum = new AtomicInteger(0);
 
     //访问申请的开关
-    private static AtomicBoolean onOff = new AtomicBoolean(true);
+    private static  AtomicBoolean onOff = new AtomicBoolean(true);
+
+    //流控客户端是否连接到服务器
+    private static AtomicBoolean connectToServer = new AtomicBoolean(true);
 
     //要连接的zk的url和端口
     private  String connectZkUrlPort;
-    private  String[] connectZkUrlPorts = {"10.124.134.37:2181","10.124.134.38:2181","10.124.134.39:2181","10.124.128.195:2181","10.124.128.196:2181"};
 
+    //curator的客户端
     private static CuratorFramework curatorFramework;
 
     private static CuratorClient curatorClient = new CuratorClient();
+
+    //当前连接的地址
+    private static String currentConnectString;
 
 //    static {
 //        try {
@@ -116,6 +115,17 @@ public class CuratorClient{
 //    }
 
 
+    public static String getCurrentConnectString() {
+        return currentConnectString;
+    }
+
+    public static void setCurrentConnectString(String currentConnectString) {
+        CuratorClient.currentConnectString = currentConnectString;
+    }
+
+    public static boolean getConnectToServer(){
+        return connectToServer.get();
+    }
 
     //私有的构造方法，单例的ZkClient
     private CuratorClient(){
@@ -126,26 +136,26 @@ public class CuratorClient{
         return curatorClient;
     }
 
-    public static boolean isOnOff() {
+    public static  boolean isOnOff() {
         return onOff.get();
     }
 
-    public static void setOn() {
+    public  void setOn() {
         onOff.set(true);
     }
 
-    public static void setOff() {
+    public  void setOff() {
         onOff.set(false);
     }
 
     /**
      * 给当前自己的缓存访问数量+1
      */
-    public void addOne2MyNum(){
+    public static void addOne2MyNum(){
         myNum.getAndIncrement();
     }
 
-    public  Integer getMyNum() {
+    public static Integer getMyNum() {
         return myNum.get();
     }
 
@@ -164,13 +174,16 @@ public class CuratorClient{
                 curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath(rootPath,"rootFlTestNodeValue".getBytes());
             }
             //自己的子节点创建，初始化
-            //代码运行到这里不用判断root节点是否存在，root节点是肯定存在的
-            //并且在调用这个initCurator()函数的时候，除了第一次调用进行初始化之外，一定是对这个临时节点操作时找不到这个节点才会报错，这时候再创建一个节点就可以
-//            if (curatorFramework.checkExists().forPath(rootPath) == null){
+            //首先判断之前是否有，有的话删除
+            if (myPath !=null && !myPath.equals("") && curatorFramework.checkExists().forPath(myPath) != null){
+                curatorFramework.delete().withVersion(-1).forPath(myPath);
+            }
+            //并且在调用这个initCurator()函数的时候，除了第一次调用进行初始化之外，一定是对这个临时节点操作时,或者当前连接断开重新连接时，找不到这个节点才会报错，这时候再创建一个节点就可以
+            if (myPath ==null || myPath.equals("") || curatorFramework.checkExists().forPath(myPath) == null){
                 Long numL = 0L;
                 byte[] numLbytes = IntLong2BytesUtil.long2Bytes(numL);
                 myPath = curatorFramework.create().withMode(CreateMode.EPHEMERAL_SEQUENTIAL).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath(rootPath+"/OSN",numLbytes);
-//            }
+            }
             //当前存的所有节点的sum的刷新  所有节点的路径的刷新
             initClientValues();
         } catch (Exception e) {
@@ -184,7 +197,7 @@ public class CuratorClient{
     public  void initClientValues(){
         try {
             //获取所有子节点的路径  这里的路径是不包含上一级的路径的不全路径 例如 全路径是  rootPath/myPath   这里获取的是 myPath的List<String>
-            getKidsPathUnderRoot();
+            getKidsPathUnderRootIn();
             //为了防止操作过程中kidsPathUnderRoot被改动
             List<String> kidsPathes = kidsPathUnderRoot;
             Long numCount = 0L;
@@ -192,6 +205,8 @@ public class CuratorClient{
                 numCount = numCount + IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(rootPath+"/"+pathes));
             }
             zkServerCurrentNumL = numCount;
+            //获取当前连接的zk地址
+            currentConnectString = curatorFramework.getZookeeperClient().getCurrentConnectionString();
         } catch (Exception e) {
             log.error(e.getMessage(),e);
         }
@@ -238,15 +253,23 @@ public class CuratorClient{
     }
 
     /**
+     * 给内部调用
      * 获取所有子节点的路径  这里的路径是不包含上一级的路径的不全路径 例如 全路径是  rootPath/myPath   这里获取的是 myPath的List<String>
      * @return
      */
-    public  List<String> getKidsPathUnderRoot() {
+    private  void getKidsPathUnderRootIn() {
         try {
             kidsPathUnderRoot  = curatorFramework.getChildren().forPath(rootPath);
         } catch (Exception e) {
             log.error(e.getMessage(),e);
         }
+    }
+
+    /**
+     * 给外部调用，获取当前的根节点下的路径
+     * @return
+     */
+    public static List<String> getKidsPathUnderRootOut() {
         return kidsPathUnderRoot;
     }
 
@@ -258,8 +281,16 @@ public class CuratorClient{
      * 获取root路径下的所有节点的数的和
      * @return
      */
-    public  Long getZkServerCurrentNumL() {
+    private   Long getZkServerCurrentNumLIn() {
         initClientValues();
+        return zkServerCurrentNumL;
+    }
+
+    /**
+     * 供外部获取当前所有节点的和
+     * @return
+     */
+    public static  Long getZkServerCurrentNumLOut(){
         return zkServerCurrentNumL;
     }
 
@@ -278,9 +309,9 @@ public class CuratorClient{
         }
     }
 
-    public static void setZkServerCurrentNumL(Long zkServerCurrentNumL) {
-        CuratorClient.zkServerCurrentNumL = zkServerCurrentNumL;
-    }
+//    public static void setZkServerCurrentNumL(Long zkServerCurrentNumL) {
+//        CuratorClient.zkServerCurrentNumL = zkServerCurrentNumL;
+//    }
 
     public static String getRootPath() {
         return rootPath;
@@ -289,14 +320,6 @@ public class CuratorClient{
     public static void setRootPath(String rootPath) {
         CuratorClient.rootPath = rootPath;
     }
-
-//    public static Queue<Long> getQueue() {
-//        return queue;
-//    }
-//
-//    public static void setQueue(Queue<Long> queue) {
-//        CuratorClient.queue = queue;
-//    }
 
 
     public static String getMyPath() {
@@ -326,19 +349,16 @@ public class CuratorClient{
 
         @Override
         public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
-//            if (connectionState == ConnectionState.LOST){
-////                for (String connectString : connectZkUrlPorts){
-//////                    curatorFramework.close();
-//////                    if (initConnect(connectString)){
-//////                        //初始化流控节点
-//////                        initCuratorNodes();
-//////                        break;
-//////                    }else {
-//////                        continue;
-//////                    }
-////                }
-//
-//            }
+            if (connectionState == ConnectionState.LOST||connectionState == ConnectionState.SUSPENDED){
+                log.info("连接丢失或挂起，设置连接状态为false，开放访问开关...");
+                connectToServer.set(false);
+                setOn();
+            }else if (connectionState == ConnectionState.RECONNECTED){
+                // 重新连接之后，之前的临时节点将被删除，重新建立一个新的节点
+                log.info("重新连接成功，设置连接状态为true,并且初始化节点和值...");
+                connectToServer.set(true);
+                initCuratorNodes();
+            }
         }
     }
 
@@ -366,26 +386,31 @@ public class CuratorClient{
         * 如果超限，就关闭访问开关，如果没有就
         * */
             while (true) {
-                try {
-                    Integer num = myNum.get();
-                    myNum.set(0);
-                    if(isOnOff()){
-                        num = 0;
-                    }
-                    if (getZkServerCurrentNumL() < PublicProperties.MAX_VALUE) {
-                        setOn();
-                        if (num > 0){
-                            addMyNum2NodeValue(num);
+                Integer num = myNum.get();
+                myNum.set(0);
+                // 如果此时是连接到服务器的，则对本地的缓存数据进行处理，否则不做处理
+                if (connectToServer.get()){
+                    try {
+                        if(isOnOff() == false){
+                            num = 0;
                         }
-                    } else {
-                        //这时候在固定时间内已经超过最大限制数量，休眠些许时间
-                        setOff();
-                        Thread.sleep(PublicProperties.QUEUE_NO_VALUE_SLEEP_MS);
+                        if (getZkServerCurrentNumLIn() < PublicProperties.MAX_VALUE) {
+                            setOn();
+                            if (num > 0){
+                                log.info("连接服务器正常,num = "+num+"，处理本地缓存访问次数，向服务器同步...");
+                                addMyNum2NodeValue(num);
+                            }
+                        } else {
+                            //这时候在固定时间内已经超过最大限制数量，休眠些许时间
+                            log.info("连接服务器正常，在固定时间内已经超过最大限制数量，休眠些许时间...");
+                            setOff();
+                            Thread.sleep(PublicProperties.QUEUE_NO_VALUE_SLEEP_MS);
+                        }
+                    } catch (InterruptedException e) {
+                        log.error("队列操作-----线程休眠出错 ："+e.getMessage(),e);
+                    } catch (Exception e) {
+                        log.error(e.getMessage(),e);
                     }
-                } catch (InterruptedException e) {
-                    log.error("队列操作-----线程休眠出错 ："+e.getMessage(),e);
-                } catch (Exception e) {
-                    log.error(e.getMessage(),e);
                 }
             }
         }
@@ -399,14 +424,14 @@ public class CuratorClient{
     public boolean initConnect(String ZkUrlPort){
         connectZkUrlPort = ZkUrlPort;
         boolean initResult = false;
-        RetryPolicy retryPolicy = new RetryUntilElapsed(1000,1000);
+        RetryPolicy retryPolicy = new RetryForever(3000);
 //        RetryPolicy retryPolicy = new ExponentialBackoffRetry(5000, 0);
         curatorFramework = CuratorFrameworkFactory.builder().connectString(ZkUrlPort)
-                .retryPolicy(retryPolicy).connectionTimeoutMs(5000)
+                .retryPolicy(retryPolicy).connectionTimeoutMs(4000)
                 .build();
         curatorFramework.start();
         try {
-            initResult = curatorFramework.blockUntilConnected(5000, TimeUnit.MILLISECONDS);
+            initResult = curatorFramework.blockUntilConnected(4500, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             log.error(e.getMessage(),e);
         }
@@ -429,9 +454,10 @@ public class CuratorClient{
             Timer timer = new Timer();
             timer.schedule(new TimerTask() {
                 public void run() {
-                    //            log.info("超过"+PublicProperties.MAX_INTERVAL_MS+"毫秒 设置节点为0......");
-                    curatorClient.setZkNodeValue0();
-//                log.info(PublicProperties.MAX_INTERVAL_MS+"毫秒时间到，将节点值设置为0成功......");
+                    if (connectToServer.get()){
+                        log.info("连接服务器正常，超过"+PublicProperties.MAX_INTERVAL_MS+"毫秒，设置节点为0......");
+                        curatorClient.setZkNodeValue0();
+                    }
                 }
             }, 5000,PublicProperties.MAX_INTERVAL_MS);
         } catch (Exception e) {

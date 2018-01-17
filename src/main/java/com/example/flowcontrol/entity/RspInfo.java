@@ -1,40 +1,53 @@
 package com.example.flowcontrol.entity;
 
 
+import java.util.Arrays;
 import java.util.List;
 
 public class RspInfo {
-    private Long currentNum;
-    private String connectZkUrlPort;
+    private Long SumNum;
+    private Integer MyNum;
     private Long maxNum;
     private String desc;
-    private List<String> zkPath;
+    private String myNodePath;
+    private List<String> uderRootPathes;
+    private String myConnectPath;
 
     @Override
     public String toString() {
         return "RspInfo{" +
-                "currentNum=" + currentNum +
-                ", connectZkUrlPort='" + connectZkUrlPort + '\'' +
+                "SumNum=" + SumNum +
+                ", MyNum=" + MyNum +
                 ", maxNum=" + maxNum +
                 ", desc='" + desc + '\'' +
-                ", zkPath=" + zkPath +
+                ", myNodePath='" + myNodePath + '\'' +
+                ", uderRootPathes=" + uderRootPathes +
+                ", myConnectPath='" + myConnectPath + '\'' +
                 '}';
     }
 
-    public Long getCurrentNum() {
-        return currentNum;
+    public List<String> getUderRootPathes() {
+        return uderRootPathes;
     }
 
-    public void setCurrentNum(Long currentNum) {
-        this.currentNum = currentNum;
+    public void setUderRootPathes(List<String> uderRootPathes) {
+        this.uderRootPathes = uderRootPathes;
     }
 
-    public String getConnectZkUrlPort() {
-        return connectZkUrlPort;
+    public Long getSumNum() {
+        return SumNum;
     }
 
-    public void setConnectZkUrlPort(String connectZkUrlPort) {
-        this.connectZkUrlPort = connectZkUrlPort;
+    public void setSumNum(Long sumNum) {
+        SumNum = sumNum;
+    }
+
+    public Integer getMyNum() {
+        return MyNum;
+    }
+
+    public void setMyNum(Integer myNum) {
+        MyNum = myNum;
     }
 
     public Long getMaxNum() {
@@ -53,11 +66,20 @@ public class RspInfo {
         this.desc = desc;
     }
 
-    public List<String> getZkPath() {
-        return zkPath;
+    public String getMyNodePath() {
+        return myNodePath;
     }
 
-    public void setZkPath(List<String> zkPath) {
-        this.zkPath = zkPath;
+    public void setMyNodePath(String myNodePath) {
+        this.myNodePath = myNodePath;
+    }
+
+
+    public String getMyConnectPath() {
+        return myConnectPath;
+    }
+
+    public void setMyConnectPath(String myConnectPath) {
+        this.myConnectPath = myConnectPath;
     }
 }

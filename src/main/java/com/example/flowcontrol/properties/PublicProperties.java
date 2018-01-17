@@ -8,7 +8,7 @@ public class PublicProperties {
     //队列没有待添加的数的时候，休眠的时间 毫秒
     public static final Long QUEUE_NO_VALUE_SLEEP_MS = 100L;
     //要连接的服务端ip 端口
-    public static final String CONNECT_ZK_URL_PORT = "10.124.134.37:2181";
+    public static final String CONNECT_ZK_URL_PORT = "10.124.134.37:2181,10.124.134.38:2181,10.124.134.39:2181,10.124.128.195:2181,10.124.128.196:2181";
 //    //客户端放在对应的服务器机器上时用这个
 //    public static final String CONNECT_ZK_URL_PORT = "127.0.0.1:2181";
     //流控测试根节点

@@ -2,11 +2,9 @@ package com.example.flowcontrol.controller;
 
 import com.example.flowcontrol.entity.CuratorClient;
 import com.example.flowcontrol.entity.RspInfo;
-import com.example.flowcontrol.entity.TestRsp;
 import com.example.flowcontrol.properties.PublicProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -28,33 +26,23 @@ public class FlowTestController {
     @RequestMapping(value = "/flowTest")
     public RspInfo test(){
         RspInfo rspInfo = new RspInfo();
-        curatorClient.addOne2MyNum();
-        if (curatorClient.isOnOff()){
-            rspInfo.setDesc("success");
-        }else {
+        CuratorClient.addOne2MyNum();
+        if (CuratorClient.isOnOff()){
+            rspInfo.setDesc("successWithFL");
+            rspInfo.setMyNum(CuratorClient.getMyNum());
+            rspInfo.setMyConnectPath(CuratorClient.getCurrentConnectString());
+            rspInfo.setMyNodePath(CuratorClient.getMyPath());
+            rspInfo.setUderRootPathes(CuratorClient.getKidsPathUnderRootOut());
+            rspInfo.setSumNum(CuratorClient.getZkServerCurrentNumLOut());
+        }else if(CuratorClient.isOnOff() && CuratorClient.getConnectToServer() == false){
+            //此时是没有连接到服务器，并且开关是打开的
+            rspInfo.setDesc("successWithoutFL");
+        } else if (CuratorClient.isOnOff() == false && CuratorClient.getConnectToServer()){
+            //此时是连接到服务器，并且开关关闭
             rspInfo.setDesc(PublicProperties.MAX_VALUE+"毫秒内访问超过最大限制,拒绝访问！！！");
-            log.error(PublicProperties.MAX_VALUE+"毫秒内访问超过最大限制，拒绝访问！！！");
+            log.info(PublicProperties.MAX_VALUE+"毫秒内访问超过最大限制，拒绝访问！！！");
         }
-//        rspInfo.setZkPath(curatorClient.getKidsPathUnderRoot());
-//        rspInfo.setConnectZkUrlPort(curatorClient.getConnectZkUrlPort());
         rspInfo.setMaxNum(PublicProperties.MAX_VALUE);
-//        rspInfo.setCurrentNum(curatorClient.getZkServerCurrentNumL());
-//        log.info(rspInfo.toString());
         return rspInfo;
-    }
-
-    @RequestMapping(value = "/add")
-    public TestRsp testRsp1(){
-        TestRsp testRsp = new TestRsp();
-        curatorClient.addOne2MyNum();
-        testRsp.setSelfCount(curatorClient.getMyNum());
-        return testRsp;
-    }
-
-    @RequestMapping(value = "/get")
-    public TestRsp testRsp2(){
-        TestRsp testRsp = new TestRsp();
-        testRsp.setSelfCount(curatorClient.getMyNum());
-        return testRsp;
     }
 }
