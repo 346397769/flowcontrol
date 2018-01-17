@@ -427,7 +427,7 @@ public class CuratorClient{
         RetryPolicy retryPolicy = new RetryForever(3000);
 //        RetryPolicy retryPolicy = new ExponentialBackoffRetry(5000, 0);
         curatorFramework = CuratorFrameworkFactory.builder().connectString(ZkUrlPort)
-                .retryPolicy(retryPolicy).connectionTimeoutMs(4000)
+                .retryPolicy(retryPolicy).namespace("flBase").connectionTimeoutMs(4000)
                 .build();
         curatorFramework.start();
         try {

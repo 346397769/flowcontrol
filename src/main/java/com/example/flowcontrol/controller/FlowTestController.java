@@ -27,7 +27,7 @@ public class FlowTestController {
     public RspInfo test(){
         RspInfo rspInfo = new RspInfo();
         CuratorClient.addOne2MyNum();
-        if (CuratorClient.isOnOff()){
+        if (CuratorClient.isOnOff() && CuratorClient.getConnectToServer()){
             rspInfo.setDesc("successWithFL");
             rspInfo.setMyNum(CuratorClient.getMyNum());
             rspInfo.setMyConnectPath(CuratorClient.getCurrentConnectString());
