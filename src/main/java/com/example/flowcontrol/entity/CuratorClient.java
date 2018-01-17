@@ -29,6 +29,15 @@ public class CuratorClient{
     //要创建的根节点路径
     private static String rootPath = PublicProperties.FL_TEST_NODE_PATH;
 
+    //固定时间内可以请求的次数
+    private static Long maxVisitValue = 500L;
+
+    //流控固定时间长度 毫秒
+    private static Integer flTimeSpanMS = 1000;
+
+    //超过限制的时候，休眠的时间 毫秒
+    private static  Integer overLimitSleepMS = 100;
+
     //创建的属于自己的目录
     private static String myPath;
 
@@ -115,6 +124,30 @@ public class CuratorClient{
 //    }
 
 
+    public static Integer getOverLimitSleepMS() {
+        return overLimitSleepMS;
+    }
+
+    public static void setOverLimitSleepMS(Integer overLimitSleepMS) {
+        CuratorClient.overLimitSleepMS = overLimitSleepMS;
+    }
+
+    public static Integer getFlTimeSpanMS() {
+        return flTimeSpanMS;
+    }
+
+    public static void setFlTimeSpanMS(Integer flTimeSpanMS) {
+        CuratorClient.flTimeSpanMS = flTimeSpanMS;
+    }
+
+    public static Long getMaxVisitValue() {
+        return maxVisitValue;
+    }
+
+    public static void setMaxVisitValue(Long maxVisitValue) {
+        CuratorClient.maxVisitValue = maxVisitValue;
+    }
+
     public static String getCurrentConnectString() {
         return currentConnectString;
     }
@@ -176,7 +209,8 @@ public class CuratorClient{
             //自己的子节点创建，初始化
             //首先判断之前是否有，有的话删除
             if (myPath !=null && !myPath.equals("") && curatorFramework.checkExists().forPath(myPath) != null){
-                curatorFramework.delete().withVersion(-1).forPath(myPath);
+                curatorFramework.delete().forPath(myPath);
+                log.info("删除节点:"+myPath);
             }
             //并且在调用这个initCurator()函数的时候，除了第一次调用进行初始化之外，一定是对这个临时节点操作时,或者当前连接断开重新连接时，找不到这个节点才会报错，这时候再创建一个节点就可以
             if (myPath ==null || myPath.equals("") || curatorFramework.checkExists().forPath(myPath) == null){
@@ -202,6 +236,7 @@ public class CuratorClient{
             List<String> kidsPathes = kidsPathUnderRoot;
             Long numCount = 0L;
             for (String pathes:kidsPathes) {
+                //加个异常处理，没有就不要了
                 numCount = numCount + IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(rootPath+"/"+pathes));
             }
             zkServerCurrentNumL = numCount;
@@ -235,18 +270,11 @@ public class CuratorClient{
 //            log.info(zkPath+" 节点加1前值为:"+currentNum+",版本号为:"+version);
             curatorFramework.setData().withVersion(-1).forPath(myPath,IntLong2BytesUtil.long2Bytes(currentNum+num));
 //            log.info(zkPath+" 节点加1后值为:"+zkServerCurrentNumL+",版本号为:"+(version+1));
-        }catch (KeeperException.BadVersionException e) {
-//            log.error("给节点加1时，版本号不对，正在重试......"+e.getMessage(),e);
-            log.error(e.getMessage(),e);
-            //重新调用自己
-//            addOne2NodeValue();
         }catch (KeeperException.NoNodeException e) {
             //这里异常是这个节点可能被删除了，重新建立这个节点
             log.error(myPath+" 节点可能被错误删除，正在重新建立节点......"+e.getMessage(),e);
             initCuratorNodes();
             addMyNum2NodeValue(num);
-            //重新调用自己
-//            addOne2NodeValue();
         }catch (Exception e) {
             log.error(e.getMessage(),e);
         }
@@ -356,8 +384,8 @@ public class CuratorClient{
             }else if (connectionState == ConnectionState.RECONNECTED){
                 // 重新连接之后，之前的临时节点将被删除，重新建立一个新的节点
                 log.info("重新连接成功，设置连接状态为true,并且初始化节点和值...");
-                connectToServer.set(true);
                 initCuratorNodes();
+                connectToServer.set(true);
             }
         }
     }
@@ -394,7 +422,7 @@ public class CuratorClient{
                         if(isOnOff() == false){
                             num = 0;
                         }
-                        if (getZkServerCurrentNumLIn() < PublicProperties.MAX_VALUE) {
+                        if (getZkServerCurrentNumLIn() < maxVisitValue) {
                             setOn();
                             if (num > 0){
                                 log.info("连接服务器正常,num = "+num+"，处理本地缓存访问次数，向服务器同步...");
@@ -404,7 +432,7 @@ public class CuratorClient{
                             //这时候在固定时间内已经超过最大限制数量，休眠些许时间
                             log.info("连接服务器正常，在固定时间内已经超过最大限制数量，休眠些许时间...");
                             setOff();
-                            Thread.sleep(PublicProperties.QUEUE_NO_VALUE_SLEEP_MS);
+                            Thread.sleep(overLimitSleepMS);
                         }
                     } catch (InterruptedException e) {
                         log.error("队列操作-----线程休眠出错 ："+e.getMessage(),e);
@@ -455,11 +483,11 @@ public class CuratorClient{
             timer.schedule(new TimerTask() {
                 public void run() {
                     if (connectToServer.get()){
-                        log.info("连接服务器正常，超过"+PublicProperties.MAX_INTERVAL_MS+"毫秒，设置节点为0......");
+                        log.info("连接服务器正常，超过"+flTimeSpanMS+"毫秒，设置节点为0......");
                         curatorClient.setZkNodeValue0();
                     }
                 }
-            }, 5000,PublicProperties.MAX_INTERVAL_MS);
+            }, 5000,flTimeSpanMS);
         } catch (Exception e) {
             log.error(e.getMessage(),e);
         }
