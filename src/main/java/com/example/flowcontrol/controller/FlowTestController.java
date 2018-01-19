@@ -1,12 +1,16 @@
 package com.example.flowcontrol.controller;
 
 import com.example.flowcontrol.entity.CuratorClient;
+import com.example.flowcontrol.entity.FlControlBean;
+import com.example.flowcontrol.entity.FlStatus;
 import com.example.flowcontrol.entity.RspInfo;
-import com.example.flowcontrol.properties.PublicProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @RestController
 public class FlowTestController {
@@ -15,31 +19,22 @@ public class FlowTestController {
 
     static {
         curatorClient = CuratorClient.getCuratorClient();
-        if (curatorClient.initConnect(PublicProperties.CONNECT_ZK_URL_PORT)){
-            //如果连接成功，那么开始流量控制
-            curatorClient.flClrStart();
-        }
+        List<FlControlBean> list = new ArrayList<FlControlBean>();
+        list.add(new FlControlBean("AOP",500,2000));
+        list.add(new FlControlBean("CBSS",400,1000));
+        curatorClient.initFl(list);
     }
 
     @RequestMapping(value = "/flowTest")
     public RspInfo test(){
         RspInfo rspInfo = new RspInfo();
-        CuratorClient.addOne2MyNum();
-        if (CuratorClient.isOnOff() && CuratorClient.getConnectToServer()){
-            rspInfo.setDesc("successWithFL");
-//            rspInfo.setMyNum(CuratorClient.getMyNum());
-//            rspInfo.setMyConnectPath(CuratorClient.getCurrentConnectString());
-//            rspInfo.setMyNodePath(CuratorClient.getMyPath());
-//            rspInfo.setUderRootPathes(CuratorClient.getKidsPathUnderRootOut());
-//            rspInfo.setSumNum(CuratorClient.getZkServerCurrentNumLOut());
-        }else if(CuratorClient.isOnOff() && CuratorClient.getConnectToServer() == false){
-            //此时是没有连接到服务器，并且开关是打开的
-            rspInfo.setDesc("successWithoutFL");
-        } else if (CuratorClient.isOnOff() == false && CuratorClient.getConnectToServer()){
-            //此时是连接到服务器，并且开关关闭
-            rspInfo.setDesc(CuratorClient.getFlTimeSpanMS()+"毫秒内访问超过最大限制,拒绝访问！！！");
+        if (curatorClient.doFlowControl("AOP") == FlStatus.OK){
+            rspInfo.setDesc("successWithFl");
+        }else if (curatorClient.doFlowControl("AOP") == FlStatus.NO){
+            rspInfo.setDesc("successWithoutFl");
+        }else {
+            rspInfo.setDesc("lostConnect");
         }
-        rspInfo.setMaxNum(CuratorClient.getMaxVisitValue());
         return rspInfo;
     }
 }

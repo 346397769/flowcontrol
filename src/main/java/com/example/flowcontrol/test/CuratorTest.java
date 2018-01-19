@@ -23,7 +23,7 @@ public class CuratorTest {
 
 //        CuratorFramework client = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
         CuratorFramework client = CuratorFrameworkFactory.builder().connectString(connectString)
-                .retryPolicy(retryPolicy).connectionTimeoutMs(3000)
+                .retryPolicy(retryPolicy).namespace("syf").connectionTimeoutMs(3000)
                 .build();
 
 
@@ -35,7 +35,7 @@ public class CuratorTest {
         ExecutorService pool = Executors.newCachedThreadPool();
 
         //设置节点的cache
-        TreeCache treeCache = new TreeCache(client, "/test1");
+        TreeCache treeCache = new TreeCache(client, "/");
                 //开始监听
         treeCache.start();
         //设置监听器和处理过程
@@ -67,34 +67,19 @@ public class CuratorTest {
 
         String myPath = "/OSN";
         System.out.println(myPath);
-        if (client.checkExists().forPath("/flCtrlTest") == null){
-            client.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/flCtrlTest","hello".getBytes());
+        if (client.checkExists().forPath("/CuratorTest") == null){
+            client.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/CuratorTest","hello".getBytes());
+        }
+        if (client.checkExists().forPath("/CuratorTest1") == null){
+            client.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/CuratorTest1","hello".getBytes());
         }
 //        if (client.checkExists().forPath("/test1"+myPath) == null){
-            myPath = client.create().withMode(CreateMode.EPHEMERAL_SEQUENTIAL).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/flCtrlTest"+myPath,"hello".getBytes());
-            System.out.println("myPath : "+myPath);
+//            myPath = client.create().withMode(CreateMode.EPHEMERAL_SEQUENTIAL).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/CuratorTest"+myPath,"hello".getBytes());
+//            System.out.println("myPath : "+myPath);
 //        }
+        List<String> list = client.getChildren().forPath("/");
+        System.out.println(list);
 
-//       try {
-//           client.setData().forPath("/test1","8888888".getBytes());
-////           client.setData().withVersion(0).forPath("/test1","9999999".getBytes());
-//       }catch (KeeperException.BadVersionException e){
-//           System.out.println("给节点加1时，版本号不对，正在重试......"+e.getMessage());
-//       }
-//        List<String> kidsPathUnderRoot  = client.getChildren().forPath("/test1");
-//
-//        System.out.println("-------------------------------------------------------");
-//        for (String s:kidsPathUnderRoot){
-//            System.out.println(s);
-//        }
-//        System.out.println("-------------------------------------------------------");
-
-        if (client.checkExists().forPath("/test1"+myPath)!=null){
-            client.delete().withVersion(-1).forPath("/test1"+myPath);
-        }
-        if (client.checkExists().forPath("/test1")!=null){
-            client.delete().withVersion(-1).forPath("/test1");
-        }
 
         treeCache.close();
         client.close();
