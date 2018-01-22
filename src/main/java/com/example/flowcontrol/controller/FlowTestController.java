@@ -6,6 +6,7 @@ import com.example.flowcontrol.entity.FlStatus;
 import com.example.flowcontrol.entity.RspInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -20,17 +21,19 @@ public class FlowTestController {
     static {
         curatorClient = CuratorClient.getCuratorClient();
         List<FlControlBean> list = new ArrayList<FlControlBean>();
-        list.add(new FlControlBean("AOP",500,2000));
-        list.add(new FlControlBean("CBSS",400,1000));
+        list.add(new FlControlBean("AOP",600,1000));
+        list.add(new FlControlBean("CBSS",800,1000));
         curatorClient.initFl(list);
     }
 
-    @RequestMapping(value = "/flowTest")
-    public RspInfo test(){
+    @RequestMapping(value = "/flowTest/{dimension}")
+    public RspInfo test(@PathVariable("dimension") String dimension){
         RspInfo rspInfo = new RspInfo();
-        if (curatorClient.doFlowControl("AOP") == FlStatus.OK){
+        rspInfo.setDimension(dimension);
+        FlStatus flResult = curatorClient.doFlowControl(dimension);
+        if (flResult == FlStatus.OK || flResult == FlStatus.WRONG_DIMENSION){
             rspInfo.setDesc("successWithFl");
-        }else if (curatorClient.doFlowControl("AOP") == FlStatus.NO){
+        }else if (flResult == FlStatus.NO){
             rspInfo.setDesc("successWithoutFl");
         }else {
             rspInfo.setDesc("lostConnect");

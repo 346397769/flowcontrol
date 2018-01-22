@@ -388,7 +388,7 @@ public class CuratorClient{
                             if (getZkServerCurrentNumLIn(flControlBean) < flControlBean.getMaxVisitValue()) {
                                 flControlBean.setOnOff(true);
                                 if (num > 0){
-                                    log.info("连接服务器正常,num = "+num+"，处理本地缓存访问次数，向服务器同步...");
+//                                    log.info("连接服务器正常,num = "+num+"，处理本地缓存访问次数，向服务器同步...");
                                     addMyNum2NodeValue(flControlBean);
                                 }
                             } else {
@@ -487,6 +487,9 @@ public class CuratorClient{
     public FlStatus doFlowControl(String dimension){
         if (!connectToServer.get()){
             return FlStatus.LOST_CONNECT;
+        }
+        if (dimensionFlctrlCurrentHashMap.get(dimension) == null){
+           return FlStatus.WRONG_DIMENSION;
         }
         dimensionFlctrlCurrentHashMap.get(dimension).addOne2MyNum();
         if (dimensionFlctrlCurrentHashMap.get(dimension).getOnOff()){
