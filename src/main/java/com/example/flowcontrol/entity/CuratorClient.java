@@ -26,7 +26,7 @@ public class CuratorClient{
     private static String rootPath = PublicProperties.FL_NODE_ROOT_PATH;
 
     //超过限制的时候，休眠的时间 毫秒
-    private static  Integer overLimitSleepMS = 100;
+    private static  Integer overLimitSleepMS = 10;
 
     //创建的属于自己的目录
     private static String myPath;
@@ -229,14 +229,14 @@ public class CuratorClient{
      * 往zkNode节点+当前缓存的本地访问数
      * org.apache.zookeeper.KeeperException$BadVersionException 这个异常表示节点版本号不对
      */
-    public static void addMyNum2NodeValue(FlControlBean flControlBean){
+    public static void addMyNum2NodeValue(FlControlBean flControlBean,Integer num){
         try {
 //            int version = curatorFramework.checkExists().forPath(zkPath).getVersion();
             Long currentNum = IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(flControlBean.getMyPath()));
-            curatorFramework.setData().forPath(flControlBean.getMyPath(),IntLong2BytesUtil.long2Bytes(currentNum+flControlBean.getMyNum()));
+            curatorFramework.setData().forPath(flControlBean.getMyPath(),IntLong2BytesUtil.long2Bytes(currentNum+num));
         }catch (KeeperException.NoNodeException e) {
             if (checkAndRecreateNodes(flControlBean.getMyPath())){
-                addMyNum2NodeValue(flControlBean);
+                addMyNum2NodeValue(flControlBean,num);
             }else {
                 log.error("节点不同步造成的异常"+e.getMessage(),e);
             }
@@ -377,28 +377,30 @@ public class CuratorClient{
         * */
             while (true) {
                 for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
-                    Integer num = flControlBean.getMyNum();
-                    flControlBean.setMyNum(0);
                     // 如果此时是连接到服务器的，则对本地的缓存数据进行处理，否则不做处理
                     if (connectToServer.get()){
                         try {
-                            if(flControlBean.getOnOff() == false){
-                                num = 0;
+                            if(flControlBean.getOnOff()){
+                                /*
+                                * 如果这里开关是打开的，那么从本地存储减去当前的数
+                                * 为什么不用设置为0，而是去减，是因为如果有延迟的话,就会出现这种情况：
+                                *    从A的到数字，将A设置为0之前，就有相同维度的访问，使得myNum这个数字增加了，这时候我还是会把它设置为0，因此造成误差
+                                *    如果是减，就不会有这种误差了
+                                * */
+                                Integer num = flControlBean.getMyNum();
+                                //将取到的值从本地存储中的值减去
+                                flControlBean.decreaseMyNum(num);
+                                //这里之所以用num而不用flControlBean存的数，是因为很可能在使用flControlBean存的数的过程中，它的值又遭到改变
+                                addMyNum2NodeValue(flControlBean,num);
                             }
                             if (getZkServerCurrentNumLIn(flControlBean) < flControlBean.getMaxVisitValue()) {
                                 flControlBean.setOnOff(true);
-                                if (num > 0){
-//                                    log.info("连接服务器正常,num = "+num+"，处理本地缓存访问次数，向服务器同步...");
-                                    addMyNum2NodeValue(flControlBean);
-                                }
                             } else {
                                 //这时候在固定时间内已经超过最大限制数量，休眠些许时间
-                                log.info("连接服务器正常，在固定时间内已经超过最大限制数量，休眠些许时间...");
+//                                log.info("连接服务器正常，在固定时间内已经超过最大限制数量，休眠些许时间...");
                                 flControlBean.setOnOff(false);
-                                Thread.sleep(overLimitSleepMS);
+//                                Thread.sleep(overLimitSleepMS);
                             }
-                        } catch (InterruptedException e) {
-                            log.error("队列操作-----线程休眠出错 ："+e.getMessage(),e);
                         } catch (Exception e) {
                             log.error(e.getMessage(),e);
                         }
@@ -483,6 +485,7 @@ public class CuratorClient{
      * 根据某一个维度进行流量控制
      * @param dimension 根据什么维度进行流量控制
      * @return FlStatus.OK 表示正常流控允许访问，FlStatus.NO 表示正常流控，拒绝访问，FlStatus.LOST_CONNECT表示与服务器失去连接
+     * FlStatus.WRONG_DIMENSION 表示没有这个维度
      */
     public FlStatus doFlowControl(String dimension){
         if (!connectToServer.get()){
@@ -491,8 +494,8 @@ public class CuratorClient{
         if (dimensionFlctrlCurrentHashMap.get(dimension) == null){
            return FlStatus.WRONG_DIMENSION;
         }
-        dimensionFlctrlCurrentHashMap.get(dimension).addOne2MyNum();
         if (dimensionFlctrlCurrentHashMap.get(dimension).getOnOff()){
+            dimensionFlctrlCurrentHashMap.get(dimension).addOne2MyNum();
             return FlStatus.OK;
         }else {
             return FlStatus.NO;

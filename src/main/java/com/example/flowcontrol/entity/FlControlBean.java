@@ -80,6 +80,10 @@ public class FlControlBean {
         this.myNum.getAndIncrement();
     }
 
+    public void decreaseMyNum(Integer num){
+        myNum.addAndGet(-num);
+    }
+
     public void setMyNum(Integer myNum) {
         this.myNum.set(myNum);
     }
