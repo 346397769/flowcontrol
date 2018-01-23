@@ -48,12 +48,8 @@ public class FlControlBean {
         return lastTimeSet02MyTempZkNode;
     }
 
-    /**
-     * 设置 上一次重置自己临时的节点为0的毫秒数 为当前时间毫秒数
-     * @param
-     */
-    public void setLastTimeSet02MyTempZkNode() {
-        this.lastTimeSet02MyTempZkNode = new Date().getTime();
+    public void setLastTimeSet02MyTempZkNode(Long lastTimeSet02MyTempZkNode) {
+        this.lastTimeSet02MyTempZkNode = lastTimeSet02MyTempZkNode;
     }
 
     public boolean getOnOff() {

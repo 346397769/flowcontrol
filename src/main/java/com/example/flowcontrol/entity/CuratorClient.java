@@ -450,9 +450,11 @@ public class CuratorClient{
                         //在每个维度的下，设置每个维度节点下自己的临时叶子节点为0
 //                        log.info("连接服务器正常，超过"+flTimeSpanMS+"毫秒，设置节点为0......");
                         for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
-                            if (new Date().getTime() - flControlBean.getLastTimeSet02MyTempZkNode() > flControlBean.getFlTimeSpanMS())
-                            curatorClient.setZkNodeValue0(flControlBean.getMyPath());
-                            flControlBean.setLastTimeSet02MyTempZkNode();
+                            Long timeLongMS = new Date().getTime();
+                            if (timeLongMS - flControlBean.getLastTimeSet02MyTempZkNode() > flControlBean.getFlTimeSpanMS()){
+                                curatorClient.setZkNodeValue0(flControlBean.getMyPath());
+                                flControlBean.setLastTimeSet02MyTempZkNode(timeLongMS);
+                            }
                         }
                     }
                 }
