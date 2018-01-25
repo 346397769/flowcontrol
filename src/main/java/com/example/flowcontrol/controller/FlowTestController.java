@@ -19,7 +19,7 @@ public class FlowTestController {
     private static CuratorClient curatorClient;
 
     static {
-        curatorClient = CuratorClient.getCuratorClient();
+        curatorClient = new CuratorClient("BASE");
         List<FlControlBean> list = new ArrayList<FlControlBean>();
         list.add(new FlControlBean("AOP",500,1000));
         list.add(new FlControlBean("CBSS",1000,1000));

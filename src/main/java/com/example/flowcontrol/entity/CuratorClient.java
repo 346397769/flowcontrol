@@ -24,114 +24,53 @@ public class CuratorClient{
     private static final Logger log = LoggerFactory.getLogger(CuratorClient.class);
 
     //要创建的根节点路径  也就是Client使用的namespace
-    private static String rootPath = PublicProperties.FL_NODE_ROOT_PATH;
+    private String rootPath = PublicProperties.FL_NODE_ROOT_PATH;
 
     //超过限制的时候，休眠的时间 毫秒
-    private static  Integer overLimitSleepMS = 100;
+    private  Integer overLimitSleepMS = 100;
 
     //创建的属于自己的目录
-    private static String myPath;
+    private String myPath;
 
     //流控客户端是否连接到服务器
-    private static AtomicBoolean connectToServer = new AtomicBoolean(true);
+    private AtomicBoolean connectToServer = new AtomicBoolean(true);
 
     //要连接的zk的url和端口
-    private static  String connectZkUrlPort = PublicProperties.CONNECT_ZK_URL_PORT;
+    private  String connectZkUrlPort = PublicProperties.CONNECT_ZK_URL_PORT;
 
     //curator的客户端
-    private static CuratorFramework curatorFramework;
+    private CuratorFramework curatorFramework;
 
-    private static CuratorClient curatorClient = new CuratorClient();
+    //private CuratorClient curatorClient = new CuratorClient();
 
     //当前的维度和每个维度对应的FlControlBean
-    private static Map<String,FlControlBean> dimensionFlctrlCurrentHashMap = new ConcurrentHashMap<String,FlControlBean>();
+    private Map<String,FlControlBean> dimensionFlctrlCurrentHashMap = new ConcurrentHashMap<String,FlControlBean>();
 
     //保存当前运行的所有的<维度，线程>的map
-    private static Map<String,Thread> runningThraedMap = new ConcurrentHashMap<String,Thread>();
+    private Map<String,Thread> runningThraedMap = new ConcurrentHashMap<String,Thread>();
 
     //保存需要被删除的维度
-    private static  List<String> needToBeDeleteDimensions = new ArrayList<String>();
+    private  List<String> needToBeDeleteDimensions = new ArrayList<String>();
 
 
-//    static {
-//        try {
-//            // 连接时间 和重试次数
-//            RetryPolicy retryPolicy = new ExponentialBackoffRetry(3000, 6);
-//            curatorFramework = CuratorFrameworkFactory.builder().connectString(connectZkUrlPort)
-//                    .retryPolicy(retryPolicy).connectionTimeoutMs(3000)
-//                    .build();
-//            curatorFramework.start();
-//            curatorFramework.blockUntilConnected();
-////        //设置节点的cache
-////        TreeCache treeCache = new TreeCache(curatorFramework, "/flCtrlTest");
-////        //开始监听
-////        treeCache.start();
-////        //设置监听器和处理过程
-////        treeCache.getListenable().addListener(new TreeCacheListener() {
-////            @Override
-////            public void childEvent(CuratorFramework curatorFramework, TreeCacheEvent event) throws Exception {
-////                ChildData data = event.getData();
-////                if(data !=null){
-////                    switch (event.getType()) {
-////                        case NODE_ADDED:
-////                            log.info("增加节点 : "+ data.getPath() +"  数据:"+ IntLong2BytesUtil.bytes2Long(data.getData()));
-////                            break;
-////                        case NODE_REMOVED:
-////                            log.info("删除节点 : "+ data.getPath());
-////                            break;
-////                        case NODE_UPDATED:
-////                            log.info("更新节点 : "+ data.getPath() +"  数据:"+ IntLong2BytesUtil.bytes2Long(data.getData()));
-////                            break;
-////                        case INITIALIZED:
-////                            log.info("初始化... : ");
-////                            break;
-////                        case CONNECTION_LOST:
-////                            log.info("连接中断...... ");
-////                            break;
-////                        case CONNECTION_SUSPENDED:
-////                            log.info("连接挂起...... ");
-////                            break;
-////                        case CONNECTION_RECONNECTED:
-////                            log.info("正在尝试重新连接...... ");
-////                            break;
-////                        default:
-////                            break;
-////                    }
-////                }else{
-////                    log.info( "data is null : "+ event.getType());
-////                }
-////            }
-////        });
-//            //初始化流控节点
-//            initCuratorNodes();
-//        } catch (InterruptedException e) {
-//            log.error("阻塞线程等待curatorFramework连接zookeeper出错，"+e.getMessage(),e);
-//        } catch (Exception e) {
-//            log.error(e.getMessage(),e);
-//        }
-//    }
 
-
-    public static Integer getOverLimitSleepMS() {
+    public Integer getOverLimitSleepMS() {
         return overLimitSleepMS;
     }
 
-    public static void setOverLimitSleepMS(Integer overLimitSleepMS) {
-        CuratorClient.overLimitSleepMS = overLimitSleepMS;
+    public void setOverLimitSleepMS(Integer overLimitSleepMS) {
+        this.overLimitSleepMS = overLimitSleepMS;
     }
 
-    public static boolean getConnectToServer(){
+    public boolean getConnectToServer(){
         return connectToServer.get();
     }
 
-    //私有的构造方法，单例的ZkClient
-    private CuratorClient(){
+    //私有的构造方法，单例的ZkClient----- 根据命名空间生成实例
+    public CuratorClient(String nameSpace){
+        this.rootPath = nameSpace;
     }
 
-    //获取单例的ZkClient
-    public static CuratorClient getCuratorClient() {
-        return curatorClient;
-    }
 
     /**
      * 初始化zookeeper的节点
@@ -143,7 +82,7 @@ public class CuratorClient{
      *      需要删除的维度节点 = listA - listB
      *      需要新建的节点 = listB - listA
      */
-    private static void initCuratorNodes(List<FlControlBean> flControlBeans){
+    private void initCuratorNodes(List<FlControlBean> flControlBeans){
         try {
             // 首先必须初始化myPath，因为每个维度下都要用这个路径
             if (myPath == null || myPath.equals("")){
@@ -220,7 +159,7 @@ public class CuratorClient{
     /**
      * 获取某个维度路径下的所有节点的存的数的和
      */
-    public static Long getZkServerCurrentNumLIn(FlControlBean flControlBean){
+    public Long getZkServerCurrentNumLIn(FlControlBean flControlBean){
             //获取所有子节点的路径  这里的路径是不包含上一级的路径的不全路径 例如 全路径是  rootPath/myPath   这里获取的是 myPath的List<String>
             List<String> kidsPathes = getKidsPathUnderRootIn("/"+flControlBean.getDimension());
             Long numCount = 0L;
@@ -242,7 +181,7 @@ public class CuratorClient{
      * @return
      * @throws Exception
      */
-    public static Long getNodeValue(String path) throws Exception {
+    public Long getNodeValue(String path) throws Exception {
         return IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(path));
     }
 
@@ -251,7 +190,7 @@ public class CuratorClient{
      * 往zkNode节点+当前缓存的本地访问数
      * org.apache.zookeeper.KeeperException$BadVersionException 这个异常表示节点版本号不对
      */
-    public static void addMyNum2NodeValue(FlControlBean flControlBean,Integer num){
+    public void addMyNum2NodeValue(FlControlBean flControlBean,Integer num){
         try {
 //            int version = curatorFramework.checkExists().forPath(zkPath).getVersion();
             Long currentNum = IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(flControlBean.getMyPath()));
@@ -272,7 +211,7 @@ public class CuratorClient{
      *     获取的是某一个维度下的路径
      * @return
      */
-    private static   List<String> getKidsPathUnderRootIn(String path) {
+    private  List<String> getKidsPathUnderRootIn(String path) {
         List<String> kidsPathUnderDimension = new ArrayList<>();
         try {
             kidsPathUnderDimension  = curatorFramework.getChildren().forPath(path);
@@ -310,7 +249,7 @@ public class CuratorClient{
      * @param path 包含根路径的path
      * @return
      */
-    private static boolean checkAndRecreateNodes(String path){
+    private boolean checkAndRecreateNodes(String path){
         boolean exist = false;
         String[] pathes = path.split("/");
         try {
@@ -334,19 +273,19 @@ public class CuratorClient{
         return exist;
     }
 
-    public static String getMyPath() {
+    public String getMyPath() {
         return myPath;
     }
 
-    public static void setMyPath(String myPath) {
-        CuratorClient.myPath = myPath;
+    public void setMyPath(String myPath) {
+        this.myPath = myPath;
     }
 
-    public  String getConnectZkUrlPort() {
+    public String getConnectZkUrlPort() {
         return connectZkUrlPort;
     }
 
-    public  void setConnectZkUrlPort(String ZkUrlPort) {
+    public void setConnectZkUrlPort(String ZkUrlPort) {
         connectZkUrlPort = ZkUrlPort;
     }
 
@@ -354,7 +293,7 @@ public class CuratorClient{
     /**
      * 内部类，用来检测连接状态,并在连接自己的节点连接不上的时候，能去连接其他服务器
      */
-       static  class MyConnectionStateListener implements ConnectionStateListener {
+    class MyConnectionStateListener implements ConnectionStateListener {
 
         @Override
         public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
@@ -378,7 +317,7 @@ public class CuratorClient{
      * 内部类，用来处理zookeeper的节点值
      * 如果本地缓存有值，那么把它加进zookeeper节点里，如果没有，那么
      */
-    static class DealZkNodes implements Runnable{
+    class DealZkNodes implements Runnable{
 
         private boolean flag = true;
         private String dimensionName;
@@ -449,7 +388,7 @@ public class CuratorClient{
      * 否则返回false
      * @return
      */
-    private static boolean initConnect(String ZkUrlPort){
+    private boolean initConnect(String ZkUrlPort){
         connectZkUrlPort = ZkUrlPort;
         boolean initResult = false;
         RetryPolicy retryPolicy = new RetryForever(3000);
@@ -470,10 +409,11 @@ public class CuratorClient{
      * 开始流量控制的相关步骤
      *
      */
-    private static void flClrStart(){
+    private void flClrStart(){
         try {
             MyConnectionStateListener stateListener = new MyConnectionStateListener();
             curatorFramework.getConnectionStateListenable().addListener(stateListener);
+            final CuratorClient curatorClient = this;
             //启动一个timer 每隔一段时间去设置zkNodes为0
             Timer timer = new Timer();
             timer.schedule(new TimerTask() {
@@ -518,7 +458,7 @@ public class CuratorClient{
      * 外围调用的方法，调用此方法会初始化连接,以及一开始的节点初始化
      * @param flControlBeans
      */
-    public static void initFl(List<FlControlBean> flControlBeans){
+    public void initFl(List<FlControlBean> flControlBeans){
         boolean connectSuccess = false;
         //如果曾经初始化过，那么curatorFramework就不会为null，并且不需要再去连接，因为它有自己的集群自动重连操作
         //也就是说，只有第一次初始化操作的时候会满足条件去初始化连接
