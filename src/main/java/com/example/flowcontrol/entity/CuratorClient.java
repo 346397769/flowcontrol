@@ -85,75 +85,92 @@ public class CuratorClient{
     private void initCuratorNodes(List<FlControlBean> flControlBeans){
         try {
             // 首先必须初始化myPath，因为每个维度下都要用这个路径
+            // 程序运行到这里，如果是重新初始化，这时候如果myPath一定不是null ，要去执行增删操作
+            // 如果myPath==null 那么表明这个程序是第一次被运行，第一次初始化，那么就把传入维度初始化就可以了。
             if (myPath == null || myPath.equals("")){
                 myPath = UUID.randomUUID().toString().replace("-","");
-            }
-            //传入的维度集合
-            List<String> listB = new ArrayList<String>();
-            //初始化维度对应map 和 获取传入的维度的集合
-            //初始化Map的value和key的List，是因为这样用于建立节点等比较方便
-            for (FlControlBean flControlBean:flControlBeans){
-                //初始化每个维度的临时统计子节点
-                flControlBean.setMyPath("/"+flControlBean.getDimension()+"/"+myPath);
-                dimensionFlctrlCurrentHashMap.put(flControlBean.getDimension(),flControlBean);
-                listB.add(flControlBean.getDimension());
-            }
 
-            //首先获取当前根节点下的所有子节点(也就是当前所有维度)的路径，为了跟传入的值进行比较，并对当前根节点下的子节点进行更新操作（增加，或者删减）
-            //获取已有的List<String>类型的维度
-            List<String> listA = getKidsPathUnderRootIn("/");
+                for (FlControlBean flControlBean:flControlBeans){
+                    flControlBean.setMyPath("/"+flControlBean.getDimension()+"/"+myPath);
+                    dimensionFlctrlCurrentHashMap.put(flControlBean.getDimension(),flControlBean);
+                    initOneNodes(flControlBean.getDimension());
+                }
 
-            //已有的维度集合的copy
-           List<String> copyListA = new ArrayList<String>(listA);
 
-            //需要删除的维度节点 = listA - listB
-            listA.removeAll(listB);
+            }else {
+                //传入的维度集合
+                List<String> listB = new ArrayList<String>();
+                //初始化维度对应map 和 获取传入的维度的集合
+                //初始化Map的value和key的List，是因为这样用于建立节点等比较方便
+                for (FlControlBean flControlBean:flControlBeans){
+                    //初始化每个维度的临时统计子节点
+                    flControlBean.setMyPath("/"+flControlBean.getDimension()+"/"+myPath);
+                    dimensionFlctrlCurrentHashMap.put(flControlBean.getDimension(),flControlBean);
+                    listB.add(flControlBean.getDimension());
+                }
 
-            //需要新建的节点 = listB - listA
-            listB.removeAll(copyListA);
+                //首先获取当前根节点下的所有子节点(也就是当前所有维度)的路径，为了跟传入的值进行比较，并对当前根节点下的子节点进行更新操作（增加，或者删减）
+                //获取已有的List<String>类型的维度
+                List<String> listA = getKidsPathUnderRootIn("/");
 
-            //删除需要删除的维度节点
-            //如果是第一次进行初始化，那么应该不会有删减操作
-            if (listA.size() > 0){
-                for (String s : listA){
-                    //将需要被删除的维度保存，以备定时检查，检查被删除了，就移除
-                    needToBeDeleteDimensions.add(s);
+                //已有的维度集合的copy
+                List<String> copyListA = new ArrayList<String>(listA);
 
-                    //将需要删除的维度map删除，需要停止的维度线程停止
-                    dimensionFlctrlCurrentHashMap.remove(s);
+                //需要删除的维度节点 = listA - listB
+                listA.removeAll(listB);
 
-                    if (curatorFramework.checkExists().forPath("/"+s) != null){
-                        curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+s);
+                //需要新建的节点 = listB - listA
+                listB.removeAll(copyListA);
+
+                //删除需要删除的维度节点
+                //如果是第一次进行初始化，那么应该不会有删减操作
+                if (listA.size() > 0){
+                    for (String s : listA){
+                        //将需要被删除的维度保存，以备定时检查，检查被删除了，就移除
+                        needToBeDeleteDimensions.add(s);
+
+                        //将需要删除的维度map删除，需要停止的维度线程停止
+                        dimensionFlctrlCurrentHashMap.remove(s);
+
+                        if (curatorFramework.checkExists().forPath("/"+s) != null){
+                            curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+s);
+                        }
+                    }
+                }
+
+                //新增需要增加的维度节点,并为其建立临时统计叶子节点
+                //如果是第一次初始化根节点操作，那么应该是将所有的维度节点进行初始化
+                //但是当建立了此维度之后，其他机器上即使第一次运行也不会走这块代码，除非维度有新增的
+                if (listB.size() > 0){
+                    for (String s : listB){
+                        initOneNodes(s);
                     }
                 }
             }
 
-            //新增需要增加的维度节点,并为其建立临时统计叶子节点
-            //如果是第一次进行操作，那么应该是将所有的维度节点进行初始化
-            if (listB.size() > 0){
-                for (String s : listB){
-                    /*
-                    *
-                    * 启动新增的处理myNum（本地缓存访问数的线程）
-                    * 每一个维度启动一个线程
-                    * 在该线程的维度被移除出map的时候就结束本线程
-                    * */
-                    Thread ts = new Thread(new DealZkNodes(s));
-                    runningThraedMap.put(s,ts);
-                    ts.start();
-                    //创建新增的根节点
-                    if (curatorFramework.checkExists().forPath("/"+s) == null){
-                        curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/"+s,s.getBytes());
-                    }
-                    //因为是新增的维度根节点，所以不用判断叶子节点是否存在，肯定不存在叶子节点，直接添加就可以
-                    Long numL = 0L;
-                    byte[] numLbytes = IntLong2BytesUtil.long2Bytes(numL);
-                    curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath(dimensionFlctrlCurrentHashMap.get(s).getMyPath(),numLbytes);
-                }
-            }
         } catch (Exception e) {
             log.error(e.getMessage(),e);
         }
+    }
+
+    private void initOneNodes(String path) throws Exception {
+        //创建新增的根节点
+        if (curatorFramework.checkExists().forPath("/"+path) == null){
+            curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/"+path,path.getBytes());
+        }
+        //因为是新增的维度根节点，所以不用判断叶子节点是否存在，肯定不存在叶子节点，直接添加就可以
+        Long numL = 0L;
+        byte[] numLbytes = IntLong2BytesUtil.long2Bytes(numL);
+        curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath(dimensionFlctrlCurrentHashMap.get(path).getMyPath(),numLbytes);
+                        /*
+                    *
+                    * 启动新增的处理myNum（本地缓存访问数）的线程
+                    * 每一个维度启动一个线程
+                    * 在该线程的维度被移除出map的时候就结束本线程
+                    * */
+        Thread ts = new Thread(new DealZkNodes(path));
+        runningThraedMap.put(path,ts);
+        ts.start();
     }
 
     /**
