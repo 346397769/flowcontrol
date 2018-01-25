@@ -24,7 +24,7 @@ public class CuratorClient{
     private static final Logger log = LoggerFactory.getLogger(CuratorClient.class);
 
     //要创建的根节点路径  也就是Client使用的namespace
-    private String rootPath = PublicProperties.FL_NODE_ROOT_PATH;
+    private String rootPath;
 
     //超过限制的时候，休眠的时间 毫秒
     private  Integer overLimitSleepMS = 100;
@@ -66,7 +66,7 @@ public class CuratorClient{
         return connectToServer.get();
     }
 
-    //私有的构造方法，单例的ZkClient----- 根据命名空间生成实例
+    //根据命名空间生成实例
     public CuratorClient(String nameSpace){
         this.rootPath = nameSpace;
     }
@@ -413,7 +413,6 @@ public class CuratorClient{
         try {
             MyConnectionStateListener stateListener = new MyConnectionStateListener();
             curatorFramework.getConnectionStateListenable().addListener(stateListener);
-            final CuratorClient curatorClient = this;
             //启动一个timer 每隔一段时间去设置zkNodes为0
             Timer timer = new Timer();
             timer.schedule(new TimerTask() {
@@ -437,7 +436,7 @@ public class CuratorClient{
                         for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
                             Long timeLongMS = new Date().getTime();
                             if (timeLongMS - flControlBean.getLastTimeSet02MyTempZkNode() > flControlBean.getFlTimeSpanMS()){
-                                curatorClient.setZkNodeValue0(flControlBean.getMyPath());
+                                setZkNodeValue0(flControlBean.getMyPath());
                                 flControlBean.setLastTimeSet02MyTempZkNode(timeLongMS);
                             }
                             //检查此刻是否超过最大限制值，如果没有，则打开流控访问的开关，并唤醒相应维度线程
