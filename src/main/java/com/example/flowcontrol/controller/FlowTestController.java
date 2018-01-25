@@ -31,12 +31,12 @@ public class FlowTestController {
         RspInfo rspInfo = new RspInfo();
         rspInfo.setDimension(dimension);
         FlStatus flResult = curatorClient.doFlowControl(dimension);
-        if (flResult == FlStatus.OK || flResult == FlStatus.WRONG_DIMENSION){
+        if (flResult == FlStatus.OK){
             rspInfo.setDesc("successWithFl");
         }else if (flResult == FlStatus.NO){
             rspInfo.setDesc("successWithoutFl");
         }else {
-            rspInfo.setDesc("lostConnect");
+            rspInfo.setDesc("lostConnect or no this dimension");
         }
         return rspInfo;
     }

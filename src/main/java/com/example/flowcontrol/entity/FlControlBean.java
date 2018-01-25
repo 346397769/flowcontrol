@@ -1,6 +1,5 @@
 package com.example.flowcontrol.entity;
 
-import java.util.Date;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -56,8 +55,16 @@ public class FlControlBean {
         return onOff.get();
     }
 
-    public void setOnOff(boolean onOff) {
-        this.onOff.set(onOff);
+//    public void setOnOff(boolean onOff) {
+//        this.onOff.set(onOff);
+//    }
+
+    public void setOn() {
+        this.onOff.set(true);
+    }
+
+    public void setOff() {
+        this.onOff.set(false);
     }
 
     public String getDimension() {
@@ -68,7 +75,7 @@ public class FlControlBean {
         this.dimension = dimension;
     }
 
-    public Integer getMyNum() {
+    public int getMyNum() {
         return myNum.get();
     }
 
@@ -76,7 +83,7 @@ public class FlControlBean {
         this.myNum.getAndIncrement();
     }
 
-    public void decreaseMyNum(Integer num){
+    public void decreaseMyNum(int num){
         myNum.addAndGet(-num);
     }
 
