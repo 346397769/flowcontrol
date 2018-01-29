@@ -9,18 +9,18 @@ public class FlControlBean {
     //缓存本地的当前请求次数
     private AtomicInteger myNum = new AtomicInteger(0);
     //固定时间内可以请求的次数
-    private Integer maxVisitValue;
+    private int maxVisitValue;
     //流控固定时间长度 毫秒
-    private Integer flTimeSpanMS;
+    private int flTimeSpanMS;
     // 当前自己的叶子节点的全路径
     private String myPath;
     //访问申请的开关
     private AtomicBoolean onOff = new AtomicBoolean(true);
     //上一次重置自己临时的节点为0的毫秒数
-    private Long lastTimeSet02MyTempZkNode = 0L;
+    private long lastTimeSet02MyTempZkNode = 0L;
 
     //myPath临时节点的路径，在传入CuratorClient的时候会自动生成，所以不用传入
-    public FlControlBean(String dimension, Integer maxVisitValue, Integer flTimeSpanMS) {
+    public FlControlBean(String dimension, int maxVisitValue, int flTimeSpanMS) {
         this.dimension = dimension;
         this.maxVisitValue = maxVisitValue;
         this.flTimeSpanMS = flTimeSpanMS;
@@ -91,7 +91,7 @@ public class FlControlBean {
         this.myNum.set(myNum);
     }
 
-    public Integer getMaxVisitValue() {
+    public int getMaxVisitValue() {
         return maxVisitValue;
     }
 
@@ -99,7 +99,7 @@ public class FlControlBean {
         this.maxVisitValue = maxVisitValue;
     }
 
-    public Integer getFlTimeSpanMS() {
+    public int getFlTimeSpanMS() {
         return flTimeSpanMS;
     }
 
