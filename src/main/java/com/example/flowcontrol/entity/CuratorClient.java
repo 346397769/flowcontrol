@@ -49,14 +49,33 @@ public class CuratorClient{
     //保存需要被删除的维度
     private  List<String> needToBeDeleteDimensions = new ArrayList<String>();
 
-    //需要执行的定时任务
-    private Timer timer = new Timer();
-
-    //leader标记
-    private AtomicBoolean leaderFlag = new AtomicBoolean(true);
-
-
+    //leader选举
+//    LeaderSelectorClient leaderSelectorClient;
     private LeaderLatch latch;
+
+    //timerTaskMap 保存作为leader执行的定时任务的map
+    private Map<String,SettingZero> timerTaskMap = new ConcurrentHashMap<String,SettingZero>();
+
+    //初始化完节点的标志，以供成为leader之后的定时任务执行
+    private boolean initNodesDoneFlag = false;
+
+
+
+
+    /**
+     * 删除 flControlBean的维度下面的所有的临时节点，相当于重置为0
+     */
+    public void deleteDimensionNodes(FlControlBean flControlBean){
+        try {
+            List<String> pathes = getKidsPathUnderRootIn("/"+flControlBean.getDimension());
+            for (String path : pathes){
+                curatorFramework.delete().forPath("/"+flControlBean.getDimension()+"/"+path);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
 
     public Map<String, FlControlBean> getDimensionFlctrlCurrentHashMap() {
         return dimensionFlctrlCurrentHashMap;
@@ -135,6 +154,9 @@ public class CuratorClient{
 
                 //需要新建的节点 = listB - listA
                 listB.removeAll(copyListA);
+
+//                //更新LeaderSelectorClient的Thread
+//                leaderSelectorClient.initSetingZeroThread(listB,listA);
 
                 //删除需要删除的维度节点
                 //如果是第一次进行初始化，那么应该不会有删减操作
@@ -221,8 +243,11 @@ public class CuratorClient{
      * 往zkNode节点+当前缓存的本地访问数
      * org.apache.zookeeper.KeeperException$BadVersionException 这个异常表示节点版本号不对
      */
-    public void addMyNum2NodeValue(FlControlBean flControlBean,int num){
+    public  void  addMyNum2NodeValue(FlControlBean flControlBean,int num){
         try {
+//            int version = curatorFramework.checkExists().forPath(flControlBean.getMyPath()).getVersion();
+//            long currentNum = IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(flControlBean.getMyPath()));
+//            curatorFramework.setData().withVersion(version).forPath(flControlBean.getMyPath(),IntLong2BytesUtil.long2Bytes(currentNum+num));
             long currentNum = IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(flControlBean.getMyPath()));
             curatorFramework.setData().forPath(flControlBean.getMyPath(),IntLong2BytesUtil.long2Bytes(currentNum+num));
         }catch (KeeperException.NoNodeException e) {
@@ -231,6 +256,10 @@ public class CuratorClient{
             }else {
                 log.error("节点不同步造成的异常"+e.getMessage(),e);
             }
+        }catch (KeeperException.BadVersionException e){
+            //出现版本号异常是因为增加值的时候，读写之间遇到了被设置为0，致使版本号不对,再来一遍就可以成功
+            addMyNum2NodeValue(flControlBean,num);
+            log.error(e.getMessage(),e);
         }catch (Exception e) {
             log.error(e.getMessage(),e);
         }
@@ -255,7 +284,7 @@ public class CuratorClient{
      * 将节点的值设置为0
      * @param set0Path
      */
-    public void setZkNodeValue0(String set0Path){
+    public  void setZkNodeValue0(String set0Path){
         long numL = 0L;
         byte[] numLbytes = IntLong2BytesUtil.long2Bytes(numL);
         try {
@@ -278,7 +307,7 @@ public class CuratorClient{
      * 将某个维度下面的所有节点设置为0
      * @param dimension
      */
-    public void setDimension0(String dimension){
+    public  void setDimension0(String dimension){
         List<String> tempNodesPathes = getKidsPathUnderRootIn("/"+dimension);
         for (String path : tempNodesPathes){
             setZkNodeValue0("/"+dimension+"/"+path);
@@ -307,6 +336,9 @@ public class CuratorClient{
                 long numL = 0L;
                 byte[] numLbytes = IntLong2BytesUtil.long2Bytes(numL);
                 curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath(path,numLbytes);
+            }else {
+                //此时说明维度节点已经被删除了，从map中删除
+                dimensionFlctrlCurrentHashMap.remove(pathes[countPath-2]);
             }
         } catch (Exception e) {
             log.error(e.getMessage(),e);
@@ -344,6 +376,8 @@ public class CuratorClient{
                 //开放所有的访问开关
                 for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
                     flControlBean.setOn();
+                    timerTaskMap.get(flControlBean.getDimension()).cancelTimerTask();
+                    timerTaskMap.remove(flControlBean.getDimension());
                 }
             }else if (connectionState == ConnectionState.RECONNECTED || connectionState == ConnectionState.CONNECTED){
                 // 重新连接之后，之前的临时节点将被删除，重新建立一个新的节点
@@ -431,19 +465,54 @@ public class CuratorClient{
      * @return
      */
     private boolean initConnect(String ZkUrlPort){
-        connectZkUrlPort = ZkUrlPort;
         boolean initResult = false;
-        RetryPolicy retryPolicy = new RetryForever(3000);
-        curatorFramework = CuratorFrameworkFactory.builder().connectString(ZkUrlPort)
-                .retryPolicy(retryPolicy).namespace(rootPath).connectionTimeoutMs(4000)
-                .build();
-        //状态监听
-        MyConnectionStateListener stateListener = new MyConnectionStateListener();
-        curatorFramework.getConnectionStateListenable().addListener(stateListener);
-
-        curatorFramework.start();
-
         try {
+            connectZkUrlPort = ZkUrlPort;
+
+            RetryPolicy retryPolicy = new RetryForever(3000);
+            curatorFramework = CuratorFrameworkFactory.builder().connectString(ZkUrlPort)
+                    .retryPolicy(retryPolicy).namespace(rootPath).connectionTimeoutMs(4000)
+                    .build();
+            //状态监听
+            MyConnectionStateListener stateListener = new MyConnectionStateListener();
+            curatorFramework.getConnectionStateListenable().addListener(stateListener);
+
+            latch = new LeaderLatch(curatorFramework, "/leader");
+
+            latch.addListener(new LeaderLatchListener() {
+
+                @Override
+                public void isLeader() {
+                    // TODO Auto-generated method stub
+                    System.out.println("I am Leader");
+                    while (true){
+                        if (initNodesDoneFlag){
+
+                            for (FlControlBean flControlBean : dimensionFlctrlCurrentHashMap.values()){
+                                timerTaskMap.put(flControlBean.getDimension(),new SettingZero(flControlBean,CuratorClient.this));
+                                timerTaskMap.get(flControlBean.getDimension()).startSetting0TimerTask();
+                            }
+                            break;
+                        }
+                        try {
+                            Thread.sleep(1000);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+
+                @Override
+                public void notLeader() {
+                    // TODO Auto-generated method stub
+                    System.out.println("I am not Leader");
+                }
+            });
+
+            curatorFramework.start();
+
+            latch.start();
+
             initResult = curatorFramework.blockUntilConnected(4500, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             log.error(e.getMessage(),e);
@@ -459,18 +528,21 @@ public class CuratorClient{
      */
     public void initFl(List<FlControlBean> flControlBeans){
         boolean initSuccess = false;
+
         //如果曾经初始化过，那么curatorFramework就不会为null，并且不需要再去连接，因为它有自己的集群自动重连操作
         //也就是说，只有第一次初始化操作的时候会满足条件去初始化连接
         if(curatorFramework == null){
             initSuccess = initConnect(connectZkUrlPort);
         }
+
         //根据传入的list，初始化流控节点
         initCuratorNodes(flControlBeans);
+        initNodesDoneFlag = true;
 
         //如果是第一次连接成功的话，那么就开始leader选举
         if (initSuccess){
-            LeaderSelectorClient leaderSelectorClient = new LeaderSelectorClient(this,"/leader");
-            leaderSelectorClient.start();
+//            LeaderSelectorClient leaderSelectorClient = new LeaderSelectorClient(this,"/leader");
+//            leaderSelectorClient.start();
         }
     }
 
@@ -488,6 +560,7 @@ public class CuratorClient{
         if (flControlBean == null){
            return FlStatus.WRONG_DIMENSION;
         }
+
         if (flControlBean.getOnOff()){
             if (runningThraedMap.get(dimension).getState() == Thread.State.WAITING){
                 synchronized (flControlBean){
@@ -497,6 +570,9 @@ public class CuratorClient{
             flControlBean.addOne2MyNum();
             return FlStatus.OK;
         }else {
+            if (getZkServerCurrentNumLIn(flControlBean) < flControlBean.getMaxVisitValue()) {
+                flControlBean.setOn();
+            }
             return FlStatus.NO;
         }
     }

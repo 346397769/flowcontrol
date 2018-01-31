@@ -6,7 +6,10 @@ import org.apache.curator.framework.recipes.leader.LeaderSelectorListenerAdapter
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Date;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implements Closeable {
 
@@ -16,15 +19,36 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
 
     private String leaderPath;
 
+    //保存当前运行的所有的<维度，线程>的map
+    private Map<String,Thread> settingZeroThraedMap = new ConcurrentHashMap<String,Thread>();
+
     public LeaderSelectorClient(CuratorClient curatorClientIn,String path){
 
         leaderPath = path;
 
         curatorClient = curatorClientIn;
 
+        List<String> initStrings = new ArrayList<>();
+
+        for (String s : curatorClient.getDimensionFlctrlCurrentHashMap().keySet()){
+            initStrings.add(s);
+        }
+
+        initSetingZeroThread(initStrings,new ArrayList<String>());
+
         leaderSelector = new LeaderSelector(curatorClient.getCuratorFramework(), path, this);
         //保证此实例在释放领导权后还可能获得领导权
         leaderSelector.autoRequeue();
+    }
+
+    public void initSetingZeroThread(List<String> add,List<String> decrease){
+        for (String s : add){
+            settingZeroThraedMap.put(s,new Thread(new SetingZero(curatorClient.getDimensionFlctrlCurrentHashMap().get(s))));
+        }
+
+        for (String s : decrease){
+            settingZeroThraedMap.remove(s);
+        }
     }
 
     public void start()
@@ -64,24 +88,50 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
                 }
             }
 
+            long maxSleepTime = 0;
             //在每个维度的下，设置维度节点下所有的临时叶子节点为0
-            for (FlControlBean flControlBean :curatorClient.getDimensionFlctrlCurrentHashMap().values()){
-                long timeLongMS = new Date().getTime();
-                if (timeLongMS - flControlBean.getLastTimeSet02MyTempZkNode() >= flControlBean.getFlTimeSpanMS()){
-                    curatorClient.setDimension0(flControlBean.getDimension());
-                    flControlBean.setLastTimeSet02MyTempZkNode(timeLongMS);
-                }
-                //检查此刻是否超过最大限制值，如果没有，则打开流控访问的开关
-                if (curatorClient.getZkServerCurrentNumLIn(flControlBean) < flControlBean.getMaxVisitValue()) {
-                    flControlBean.setOn();
+            for (FlControlBean flControlBean : curatorClient.getDimensionFlctrlCurrentHashMap().values()){
+                if (maxSleepTime < flControlBean.getFlTimeSpanMS())
+                {
+                    maxSleepTime = flControlBean.getFlTimeSpanMS();
                 }
 
+                settingZeroThraedMap.get(flControlBean.getDimension()).start();
+
+//                long timeLongMS = new Date().getTime();
+//                if (timeLongMS - flControlBean.getLastTimeSet02MyTempZkNode() >= flControlBean.getFlTimeSpanMS()){
+//                    curatorClient.setDimension0(flControlBean.getDimension());
+////                    curatorClient.deleteDimensionNodes(flControlBean);
+//                    flControlBean.setLastTimeSet02MyTempZkNode(timeLongMS);
+//                }
             }
+
+            Thread.sleep(maxSleepTime);
         }
-        Thread.sleep(1000);
+
     }
 
     public String getLeaderPath() {
         return leaderPath;
+    }
+
+
+    class SetingZero implements Runnable{
+
+        private FlControlBean flControlBean;
+
+        public SetingZero(FlControlBean flControl){
+            flControlBean = flControl;
+        }
+
+        @Override
+        public void run() {
+            try {
+                Thread.sleep(flControlBean.getFlTimeSpanMS());
+                curatorClient.setDimension0(flControlBean.getDimension());
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
     }
 }
