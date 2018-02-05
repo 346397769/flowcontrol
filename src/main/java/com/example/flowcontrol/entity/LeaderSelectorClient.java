@@ -19,37 +19,17 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
 
     private String leaderPath;
 
-    //保存当前运行的所有的<维度，线程>的map
-    private Map<String,Thread> settingZeroThraedMap = new ConcurrentHashMap<String,Thread>();
-
     public LeaderSelectorClient(CuratorClient curatorClientIn,String path){
 
         leaderPath = path;
 
         curatorClient = curatorClientIn;
 
-        List<String> initStrings = new ArrayList<>();
-
-        for (String s : curatorClient.getDimensionFlctrlCurrentHashMap().keySet()){
-            initStrings.add(s);
-        }
-
-        initSetingZeroThread(initStrings,new ArrayList<String>());
-
         leaderSelector = new LeaderSelector(curatorClient.getCuratorFramework(), path, this);
         //保证此实例在释放领导权后还可能获得领导权
         leaderSelector.autoRequeue();
     }
 
-    public void initSetingZeroThread(List<String> add,List<String> decrease){
-        for (String s : add){
-            settingZeroThraedMap.put(s,new Thread(new SetingZero(curatorClient.getDimensionFlctrlCurrentHashMap().get(s))));
-        }
-
-        for (String s : decrease){
-            settingZeroThraedMap.remove(s);
-        }
-    }
 
     public void start()
     {
@@ -74,7 +54,21 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
 
     @Override
     public void takeLeadership(CuratorFramework curatorFramework) throws Exception {
-        if (curatorClient.getConnectToServer()){
+
+        System.out.println("我是leader！");
+
+        //给每个维度增加定时任务
+        while(true){
+            if (curatorClient.isInitNodesDoneFlag()){
+                for (FlControlBean flControlBean : curatorClient.getDimensionFlctrlCurrentHashMap().values()){
+                    curatorClient.addTimerTask(flControlBean.getDimension());
+                }
+                break;
+            }
+            Thread.sleep(1000);
+        }
+
+        while (curatorClient.getConnectToServer()){
             //检查需要被删除的维度的线程有没有停止，没停止的话就删除
             for (String s : curatorClient.getNeedToBeDeleteDimensions()){
                 if (curatorClient.getRunningThraedMap().get(s).getState() != Thread.State.TERMINATED){
@@ -84,29 +78,11 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
                     //从正在运行的线程map中把它删除
                     curatorClient.getRunningThraedMap().remove(s);
                     //从需要被删除的维度中移除
-                    curatorClient.getRunningThraedMap().remove(s);
+                    curatorClient.getNeedToBeDeleteDimensions().remove(s);
                 }
             }
 
-            long maxSleepTime = 0;
-            //在每个维度的下，设置维度节点下所有的临时叶子节点为0
-            for (FlControlBean flControlBean : curatorClient.getDimensionFlctrlCurrentHashMap().values()){
-                if (maxSleepTime < flControlBean.getFlTimeSpanMS())
-                {
-                    maxSleepTime = flControlBean.getFlTimeSpanMS();
-                }
-
-                settingZeroThraedMap.get(flControlBean.getDimension()).start();
-
-//                long timeLongMS = new Date().getTime();
-//                if (timeLongMS - flControlBean.getLastTimeSet02MyTempZkNode() >= flControlBean.getFlTimeSpanMS()){
-//                    curatorClient.setDimension0(flControlBean.getDimension());
-////                    curatorClient.deleteDimensionNodes(flControlBean);
-//                    flControlBean.setLastTimeSet02MyTempZkNode(timeLongMS);
-//                }
-            }
-
-            Thread.sleep(maxSleepTime);
+            Thread.sleep(60000);
         }
 
     }
@@ -115,23 +91,4 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
         return leaderPath;
     }
 
-
-    class SetingZero implements Runnable{
-
-        private FlControlBean flControlBean;
-
-        public SetingZero(FlControlBean flControl){
-            flControlBean = flControl;
-        }
-
-        @Override
-        public void run() {
-            try {
-                Thread.sleep(flControlBean.getFlTimeSpanMS());
-                curatorClient.setDimension0(flControlBean.getDimension());
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-    }
 }

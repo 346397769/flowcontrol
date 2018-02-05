@@ -49,10 +49,6 @@ public class CuratorClient{
     //保存需要被删除的维度
     private  List<String> needToBeDeleteDimensions = new ArrayList<String>();
 
-    //leader选举
-//    LeaderSelectorClient leaderSelectorClient;
-    private LeaderLatch latch;
-
     //timerTaskMap 保存作为leader执行的定时任务的map
     private Map<String,SettingZero> timerTaskMap = new ConcurrentHashMap<String,SettingZero>();
 
@@ -74,6 +70,10 @@ public class CuratorClient{
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public boolean isInitNodesDoneFlag() {
+        return initNodesDoneFlag;
     }
 
 
@@ -223,7 +223,7 @@ public class CuratorClient{
                 try {
                     numCount = numCount + getNodeValue("/"+flControlBean.getDimension()+"/"+pathes);
                 } catch (Exception e) {
-                    log.error("获取节点"+pathes+"数据失败，该节点可能由于客户端断线而已经不存在",e.getMessage(),e);
+                    log.error("获取节点"+pathes+"数据失败，该节点可能由于删除时间到被删除，或者客户端断线而已经不存在",e.getMessage(),e);
                 }
             }
             return numCount;
@@ -376,8 +376,12 @@ public class CuratorClient{
                 connectToServer.set(false);
                 //开放所有的访问开关
                 for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
+
                     flControlBean.setOn();
-                    cancelTimerTask(flControlBean.getDimension());
+
+                    if (timerTaskMap.get(flControlBean.getDimension()) != null){
+                        cancelTimerTask(flControlBean.getDimension());
+                    }
                 }
             }else if (connectionState == ConnectionState.RECONNECTED || connectionState == ConnectionState.CONNECTED){
                 // 重新连接之后，之前的临时节点将被删除，重新建立一个新的节点
@@ -465,40 +469,11 @@ public class CuratorClient{
             MyConnectionStateListener stateListener = new MyConnectionStateListener();
             curatorFramework.getConnectionStateListenable().addListener(stateListener);
 
-            latch = new LeaderLatch(curatorFramework, "/leader");
-
-            latch.addListener(new LeaderLatchListener() {
-
-                @Override
-                public void isLeader() {
-                    // TODO Auto-generated method stub
-                    System.out.println("I am Leader");
-                    while (true){
-                        if (initNodesDoneFlag){
-
-                            for (FlControlBean flControlBean : dimensionFlctrlCurrentHashMap.values()){
-                                addTimerTask(flControlBean.getDimension());
-                            }
-                            break;
-                        }
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-                    }
-                }
-
-                @Override
-                public void notLeader() {
-                    // TODO Auto-generated method stub
-                    System.out.println("I am not Leader");
-                }
-            });
+            LeaderSelectorClient leaderSelectorClient = new LeaderSelectorClient(this,"/leader");
 
             curatorFramework.start();
 
-            latch.start();
+            leaderSelectorClient.start();
 
             initResult = curatorFramework.blockUntilConnected(4500, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
@@ -514,31 +489,16 @@ public class CuratorClient{
      * @param flControlBeans
      */
     public void initFl(List<FlControlBean> flControlBeans){
-        boolean firstInit = false;
         //如果曾经初始化过，那么curatorFramework就不会为null，并且不需要再去连接，因为它有自己的集群自动重连操作
         //也就是说，只有第一次初始化操作的时候会满足条件去初始化连接
         if(curatorFramework == null){
-            firstInit = initConnect(connectZkUrlPort);
+           initConnect(connectZkUrlPort);
         }
 
         //根据传入的list，初始化流控节点
         initCuratorNodes(flControlBeans);
+        //初始化节点成功的flag置为true
         initNodesDoneFlag = true;
-        //第一次初始化的时候，要启动一个定时任务去定时检查运行的或阻塞的线程中有没有需要被删除的，那么去删除它
-        if (firstInit){
-            Timer timer = new Timer();
-            timer.schedule(new TimerTask() {
-                @Override
-                public void run() {
-                    for (String s : needToBeDeleteDimensions){
-                        if (runningThraedMap.get(s).getState() != Thread.State.TERMINATED){
-                            runningThraedMap.get(s).interrupt();
-                            runningThraedMap.remove(s);
-                        }
-                    }
-                }
-            },10000,60000);
-        }
     }
 
     /**
@@ -586,7 +546,7 @@ public class CuratorClient{
      * 根据dimension增加timerTask定时任务，用来定时重新初始化（删除）节点
      * @param dimension
      */
-    private void addTimerTask(String dimension){
+    public void addTimerTask(String dimension){
         timerTaskMap.put(dimension,new SettingZero(dimensionFlctrlCurrentHashMap.get(dimension),CuratorClient.this));
         timerTaskMap.get(dimension).startSetting0TimerTask();
     }
@@ -595,7 +555,7 @@ public class CuratorClient{
      * 根据dimension取消定时任务，在这个维度被删除或者失去leader的时候执行
      * @param dimension
      */
-    private void cancelTimerTask(String dimension){
+    public void cancelTimerTask(String dimension){
         timerTaskMap.get(dimension).cancelTimerTask();
         timerTaskMap.remove(dimension);
     }
