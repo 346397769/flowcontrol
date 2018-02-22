@@ -82,7 +82,7 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
                 }
             }
 
-            Thread.sleep(60000);
+            Thread.sleep(1000*60*60*24);
         }
 
     }
