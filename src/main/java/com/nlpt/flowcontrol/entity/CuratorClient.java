@@ -221,19 +221,29 @@ public class CuratorClient{
      * 获取某个维度路径下的所有节点的存的数的和
      */
     public long getZkServerCurrentNumLIn(FlControlBean flControlBean){
-            //获取所有子节点的路径  这里的路径是不包含上一级的路径的不全路径 例如 全路径是  /dimension/myPath   这里获取的是 myPath的List<String>
-            List<String> kidsPathes = getKidsPathUnderRootIn("/"+flControlBean.getDimension());
-            long numCount = 0L;
-            for (String pathes:kidsPathes) {
-                //加个异常处理，没有这个节点就不要统计了，去统计下一个
-                //getNodeValue 用这个方法
-                try {
-                    numCount = numCount + getNodeValue("/"+flControlBean.getDimension()+"/"+pathes);
-                } catch (Exception e) {
-                    log.error("获取节点"+pathes+"数据失败，该节点可能由于删除时间到被删除，或者客户端断线而已经不存在",e.getMessage(),e);
-                }
+        //获取所有子节点的路径  这里的路径是不包含上一级的路径的不全路径 例如 全路径是  /dimension/myPath   这里获取的是 myPath的List<String>
+        List<String> kidsPathes = getKidsPathUnderRootIn("/"+flControlBean.getDimension());
+        long numCount = 0L;
+        for (String pathes:kidsPathes) {
+            //加个异常处理，没有这个节点就不要统计了，去统计下一个
+            //getNodeValue 用这个方法
+            try {
+                numCount = numCount + getNodeValue("/"+flControlBean.getDimension()+"/"+pathes);
+            } catch (Exception e) {
+                log.error("获取节点"+pathes+"数据失败，该节点可能由于删除时间到被删除，或者客户端断线而已经不存在",e.getMessage(),e);
             }
-            return numCount;
+        }
+        flControlBean.setLastTimeDimensionFlow(numCount);
+        return numCount;
+    }
+
+    /**
+     * 获取上一次统计的当前流量
+     * @param dimension
+     * @return
+     */
+    public long getCurrentFlow(String dimension){
+        return dimensionFlctrlCurrentHashMap.get(dimension).getLastTimeDimensionFlow();
     }
 
     /**
@@ -424,10 +434,10 @@ public class CuratorClient{
                     * */
             while (dimensionFlctrlCurrentHashMap.get(dimensionName)!=null && flag) {
 
-                    // 如果此时是连接到服务器的，则对本地的缓存数据进行处理，否则不做处理
-                    if (connectToServer.get()){
-                        FlControlBean flControlBean = dimensionFlctrlCurrentHashMap.get(dimensionName);
-                        try {
+                // 如果此时是连接到服务器的，则对本地的缓存数据进行处理，否则不做处理
+                if (connectToServer.get()){
+                    FlControlBean flControlBean = dimensionFlctrlCurrentHashMap.get(dimensionName);
+                    try {
                                 /*
                                 *  如果本地存储的数是>0的，从本地存储减去当前的数
                                 *    去减而不是设置0的好处是，是因为如果有延迟的话,就会出现这种情况：
@@ -437,32 +447,32 @@ public class CuratorClient{
                                 *    但是，减去的话，跟加的时候，操作的是同一个数，高并发下这种操作可能会性能低
                                 *    本着宽容策略和性能的角度，设置0
                                 * */
-                                int num = flControlBean.getMyNum();
-                                if(num > 0){
-                                    //将取到的值从本地存储中的值减去
+                        int num = flControlBean.getMyNum();
+                        if(num > 0){
+                            //将取到的值从本地存储中的值减去
 //                                    flControlBean.decreaseMyNum(num);
-                                    //这里用set 0  而不是 减去0  有两点原因
-                                    // 第一 在很大的访问量的时候,set 0 的时候,myNum也正在增加，就会有增加的这部分的上限被set 为0，使得它的设置上限值增加
-                                    // 第二 myNum这个是线程安全的，但是在得不到应得的正确数值的时候就会造成无限循环，导致效率降低
-                                    flControlBean.setMyNum(0);
-                                    //这里之所以用num而不用flControlBean存的数，是因为很可能在使用flControlBean存的数的过程中，它的值又遭到改变
-                                    addMyNum2NodeValue(flControlBean,num);
-                                    //如果此时超过限制，那么关闭开关
-                                    if (getZkServerCurrentNumLIn(flControlBean) > flControlBean.getMaxVisitValue()) {
-                                        flControlBean.setOff();
-                                    }
-                                }else {
-                                    synchronized (flControlBean){
-                                        flControlBean.wait();
-                                    }
-                                }
-                        } catch (InterruptedException e){
-                            //触发这个异常说明此时已经从dimensionFlctrlCurrentHashMap中把此维度移除，但是这个线程却还没有停止
-                            flag = false;
-                        }catch (Exception e) {
-                            log.error(e.getMessage(),e);
+                            //这里用set 0  而不是 减去0  有两点原因
+                            // 第一 在很大的访问量的时候,set 0 的时候,myNum也正在增加，就会有增加的这部分的上限被set 为0，使得它的设置上限值增加
+                            // 第二 myNum这个是线程安全的，但是在得不到应得的正确数值的时候就会造成无限循环，导致效率降低
+                            flControlBean.setMyNum(0);
+                            //这里之所以用num而不用flControlBean存的数，是因为很可能在使用flControlBean存的数的过程中，它的值又遭到改变
+                            addMyNum2NodeValue(flControlBean,num);
+                            //如果此时超过限制，那么关闭开关
+                            if (getZkServerCurrentNumLIn(flControlBean) > flControlBean.getMaxVisitValue()) {
+                                flControlBean.setOff();
+                            }
+                        }else {
+                            synchronized (flControlBean){
+                                flControlBean.wait();
+                            }
                         }
+                    } catch (InterruptedException e){
+                        //触发这个异常说明此时已经从dimensionFlctrlCurrentHashMap中把此维度移除，但是这个线程却还没有停止
+                        flag = false;
+                    }catch (Exception e) {
+                        log.error(e.getMessage(),e);
                     }
+                }
             }
         }
     }
@@ -508,25 +518,25 @@ public class CuratorClient{
         //如果曾经初始化过，那么curatorFramework就不会为null，并且不需要再去连接，因为它有自己的集群自动重连操作
         //也就是说，只有第一次初始化操作的时候会满足条件去初始化连接
         if(curatorFramework == null){
-           initConnect(connectZkUrlPort);
+            initConnect(connectZkUrlPort);
             Timer timer = new Timer();
-           timer.schedule(new TimerTask() {
-               @Override
-               public void run() {
-                   //检查需要被删除的维度的线程有没有停止，没停止的话就删除
-                   for (String s : getNeedToBeDeleteDimensions()){
-                       if (getRunningThraedMap().get(s).getState() != Thread.State.TERMINATED){
-                           //提醒该线程需要结束了
-                           getRunningThraedMap().get(s).interrupt();
-                       }else {
-                           //从正在运行的线程map中把它删除
-                           getRunningThraedMap().remove(s);
-                           //从需要被删除的维度中移除
-                           getNeedToBeDeleteDimensions().remove(s);
-                       }
-                   }
-               }
-           },1000,1000*60);
+            timer.schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    //检查需要被删除的维度的线程有没有停止，没停止的话就删除
+                    for (String s : getNeedToBeDeleteDimensions()){
+                        if (getRunningThraedMap().get(s).getState() != Thread.State.TERMINATED){
+                            //提醒该线程需要结束了
+                            getRunningThraedMap().get(s).interrupt();
+                        }else {
+                            //从正在运行的线程map中把它删除
+                            getRunningThraedMap().remove(s);
+                            //从需要被删除的维度中移除
+                            getNeedToBeDeleteDimensions().remove(s);
+                        }
+                    }
+                }
+            },1000,1000*60);
         }
 
         //根据传入的list，初始化流控节点
@@ -547,7 +557,7 @@ public class CuratorClient{
         }
         FlControlBean flControlBean = dimensionFlctrlCurrentHashMap.get(dimension);
         if (flControlBean == null){
-           return FlStatus.WRONG_DIMENSION;
+            return FlStatus.WRONG_DIMENSION;
         }
 
         if (flControlBean.getOnOff()){
