@@ -1,9 +1,9 @@
-package com.example.flowcontrol.controller;
+package com.nlpt.flowcontrol.controller;
 
-import com.example.flowcontrol.entity.CuratorClient;
-import com.example.flowcontrol.entity.FlControlBean;
-import com.example.flowcontrol.entity.FlStatus;
-import com.example.flowcontrol.entity.RspInfo;
+import com.nlpt.flowcontrol.entity.CuratorClient;
+import com.nlpt.flowcontrol.entity.FlStatus;
+import com.nlpt.flowcontrol.entity.RspInfo;
+import com.nlpt.flowcontrol.entity.FlControlBean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,7 +19,7 @@ public class FlowTestController {
     private static CuratorClient curatorClient;
 
     static {
-        curatorClient = new CuratorClient("BASE");
+        curatorClient = new CuratorClient("BASE","10.124.134.37:2181,10.124.134.38:2181,10.124.134.39:2181,10.124.128.195:2181,10.124.128.196:2181");
         List<FlControlBean> list = new ArrayList<FlControlBean>();
 //        list.add(new FlControlBean("AOP",500,1000));
         list.add(new FlControlBean("CBSS",1000,1000));

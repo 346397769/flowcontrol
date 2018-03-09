@@ -1,4 +1,4 @@
-package com.example.flowcontrol.entity;
+package com.nlpt.flowcontrol.entity;
 
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.leader.LeaderSelector;
@@ -6,11 +6,11 @@ import org.apache.curator.framework.recipes.leader.LeaderSelectorListenerAdapter
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * CuratorClient 会调用并实例化这个类
+ * 此类用于zookeeper客户端的选举，并执行唯一的任务
+ */
 public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implements Closeable {
 
     private  LeaderSelector leaderSelector;
@@ -68,22 +68,12 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
             Thread.sleep(1000);
         }
 
-        while (curatorClient.getConnectToServer()){
-            //检查需要被删除的维度的线程有没有停止，没停止的话就删除
-            for (String s : curatorClient.getNeedToBeDeleteDimensions()){
-                if (curatorClient.getRunningThraedMap().get(s).getState() != Thread.State.TERMINATED){
-                    //提醒该线程需要结束了
-                    curatorClient.getRunningThraedMap().get(s).interrupt();
-                }else {
-                    //从正在运行的线程map中把它删除
-                    curatorClient.getRunningThraedMap().remove(s);
-                    //从需要被删除的维度中移除
-                    curatorClient.getNeedToBeDeleteDimensions().remove(s);
-                }
-            }
 
-            Thread.sleep(1000*60*60*24);
+        synchronized (curatorClient.getLeaderLock()){
+            curatorClient.getLeaderLock().wait();
         }
+
+        System.out.println("我将失去leader了!");
 
     }
 

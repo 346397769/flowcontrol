@@ -1,4 +1,4 @@
-package com.example.flowcontrol.properties;
+package com.nlpt.flowcontrol.properties;
 
 public class PublicProperties {
     //要连接的服务端ip 端口

@@ -1,4 +1,4 @@
-package com.example.flowcontrol.entity;
+package com.nlpt.flowcontrol.entity;
 
 import java.util.Timer;
 import java.util.TimerTask;

@@ -1,12 +1,8 @@
-package com.example.flowcontrol.entity;
-
-import com.example.flowcontrol.properties.PublicProperties;
-import com.example.flowcontrol.utils.IntLong2BytesUtil;
+package com.nlpt.flowcontrol.entity;
+import com.nlpt.flowcontrol.utils.IntLong2BytesUtil;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
-import org.apache.curator.framework.recipes.leader.LeaderLatch;
-import org.apache.curator.framework.recipes.leader.LeaderLatchListener;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.framework.state.ConnectionStateListener;
 import org.apache.curator.retry.*;
@@ -21,7 +17,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-
+/**
+ *  流控需要实例化这个类，并调用其中的两个方法
+ * 1. initFl  初始化流控节点
+ * 2. doFlowControl 根据初始化的节点进行流控
+ *
+ */
 public class CuratorClient{
     private static final Logger log = LoggerFactory.getLogger(CuratorClient.class);
 
@@ -35,7 +36,7 @@ public class CuratorClient{
     private AtomicBoolean connectToServer = new AtomicBoolean(true);
 
     //要连接的zk的url和端口
-    private  String connectZkUrlPort = PublicProperties.CONNECT_ZK_URL_PORT;
+    private  String connectZkUrlPort;
 
     //curator的客户端
     private CuratorFramework curatorFramework = null;
@@ -55,7 +56,8 @@ public class CuratorClient{
     //初始化完节点的标志，以供成为leader之后的定时任务执行
     private boolean initNodesDoneFlag = false;
 
-
+    //获取leader时的锁，该锁将会在失去leader时被释放
+    private String LeaderLock = "LEADER_LOCK";
 
 
     /**
@@ -70,6 +72,10 @@ public class CuratorClient{
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public String getLeaderLock() {
+        return LeaderLock;
     }
 
     public boolean isInitNodesDoneFlag() {
@@ -97,9 +103,10 @@ public class CuratorClient{
         return connectToServer.get();
     }
 
-    //根据命名空间生成实例
-    public CuratorClient(String nameSpace){
+    //根据命名空间和连接串生成实例
+    public CuratorClient(String nameSpace,String connectZkUrlPort){
         this.rootPath = nameSpace;
+        this.connectZkUrlPort = connectZkUrlPort;
     }
 
 
@@ -258,9 +265,9 @@ public class CuratorClient{
                 log.error("节点不同步造成的异常"+e.getMessage(),e);
             }
         }catch (KeeperException.BadVersionException e){
+            log.error(e.getMessage(),e);
             //出现版本号异常是因为增加值的时候，读写之间遇到了被设置为0，致使版本号不对,再来一遍就可以成功
             addMyNum2NodeValue(flControlBean,num);
-            log.error(e.getMessage(),e);
         }catch (Exception e) {
             log.error(e.getMessage(),e);
         }
@@ -372,7 +379,12 @@ public class CuratorClient{
         @Override
         public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
             if (connectionState == ConnectionState.LOST||connectionState == ConnectionState.SUSPENDED){
-                log.info("连接丢失或挂起，设置连接状态为false，开放所有的访问开关...");
+                log.info("连接丢失或挂起，设置连接状态为false，释放leader，开放所有的访问开关...");
+
+                synchronized (getLeaderLock()){
+                    getLeaderLock().notifyAll();
+                }
+
                 connectToServer.set(false);
                 //开放所有的访问开关
                 for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
@@ -418,16 +430,20 @@ public class CuratorClient{
                         try {
                                 /*
                                 *  如果本地存储的数是>0的，从本地存储减去当前的数
-                                * 为什么不用设置为0，而是去减，是因为如果有延迟的话,就会出现这种情况：
+                                *    去减而不是设置0的好处是，是因为如果有延迟的话,就会出现这种情况：
                                 *    从A的到数字，将A设置为0之前，就有相同维度的访问，使得myNum这个数字增加了，这时候我还是会把它设置为0，因此造成误差
                                 *    如果是减，就不会有这种误差了
                                 *
                                 *    但是，减去的话，跟加的时候，操作的是同一个数，高并发下这种操作可能会性能低
+                                *    本着宽容策略和性能的角度，设置0
                                 * */
                                 int num = flControlBean.getMyNum();
                                 if(num > 0){
                                     //将取到的值从本地存储中的值减去
 //                                    flControlBean.decreaseMyNum(num);
+                                    //这里用set 0  而不是 减去0  有两点原因
+                                    // 第一 在很大的访问量的时候,set 0 的时候,myNum也正在增加，就会有增加的这部分的上限被set 为0，使得它的设置上限值增加
+                                    // 第二 myNum这个是线程安全的，但是在得不到应得的正确数值的时候就会造成无限循环，导致效率降低
                                     flControlBean.setMyNum(0);
                                     //这里之所以用num而不用flControlBean存的数，是因为很可能在使用flControlBean存的数的过程中，它的值又遭到改变
                                     addMyNum2NodeValue(flControlBean,num);
@@ -493,6 +509,24 @@ public class CuratorClient{
         //也就是说，只有第一次初始化操作的时候会满足条件去初始化连接
         if(curatorFramework == null){
            initConnect(connectZkUrlPort);
+            Timer timer = new Timer();
+           timer.schedule(new TimerTask() {
+               @Override
+               public void run() {
+                   //检查需要被删除的维度的线程有没有停止，没停止的话就删除
+                   for (String s : getNeedToBeDeleteDimensions()){
+                       if (getRunningThraedMap().get(s).getState() != Thread.State.TERMINATED){
+                           //提醒该线程需要结束了
+                           getRunningThraedMap().get(s).interrupt();
+                       }else {
+                           //从正在运行的线程map中把它删除
+                           getRunningThraedMap().remove(s);
+                           //从需要被删除的维度中移除
+                           getNeedToBeDeleteDimensions().remove(s);
+                       }
+                   }
+               }
+           },1000,1000*60);
         }
 
         //根据传入的list，初始化流控节点

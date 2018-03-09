@@ -1,4 +1,4 @@
-package com.example.flowcontrol.entity;
+package com.nlpt.flowcontrol.entity;
 
 public class RspInfo {
     private String desc;

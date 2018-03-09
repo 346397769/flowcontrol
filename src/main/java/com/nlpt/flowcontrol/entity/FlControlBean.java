@@ -1,4 +1,4 @@
-package com.example.flowcontrol.entity;
+package com.nlpt.flowcontrol.entity;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;

@@ -1,4 +1,4 @@
-package com.example.flowcontrol;
+package com.nlpt.flowcontrol;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;

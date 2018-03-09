@@ -3,7 +3,7 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 
-	<groupId>com.example</groupId>
+	<groupId>com.nlpt</groupId>
 	<artifactId>flowcontrol</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<packaging>jar</packaging>
@@ -55,10 +55,21 @@
 
 	<build>
 		<plugins>
+			<!--springboot自带的编译，编译成可运行的jar-->
 			<plugin>
-				<groupId>org.springframework.boot</groupId>
-				<artifactId>spring-boot-maven-plugin</artifactId>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+			<!--使用maven编译成其他程序可以引用的jar包-->
+			<!--<plugin>-->
+				<!--<groupId>org.apache.maven.plugins</groupId>-->
+				<!--<artifactId>maven-compiler-plugin</artifactId>-->
+				<!--<configuration>-->
+					<!--<source>1.7</source>-->
+					<!--<target>1.7</target>-->
+				<!--</configuration>-->
+			<!--</plugin>-->
+			<!--跳过test进行编译-->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>

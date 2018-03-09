@@ -1,4 +1,4 @@
-package com.example.flowcontrol;
+package com.nlpt.flowcontrol;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
