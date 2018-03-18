@@ -55,6 +55,8 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
     @Override
     public void takeLeadership(CuratorFramework curatorFramework) throws Exception {
 
+        curatorClient.setLeader();
+
         System.out.println("我是leader！");
 
         //给每个维度增加定时任务
@@ -73,8 +75,8 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
             curatorClient.getLeaderLock().wait();
         }
 
-        System.out.println("我将失去leader了!");
-
+        curatorClient.setNotLeader();
+        System.out.println("我失去leader了!");
     }
 
     public String getLeaderPath() {
