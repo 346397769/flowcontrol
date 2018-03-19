@@ -160,6 +160,8 @@ public class CuratorClient{
                     listB.add(flControlBean.getDimension());
                 }
 
+                updateNodes(flControlBeans);
+
                 //首先获取当前根节点下的所有子节点(也就是当前所有维度)的路径，为了跟传入的值进行比较，并对当前根节点下的子节点进行更新操作（增加，或者删减）
                 //获取已有的List<String>类型的维度
                 List<String> listA = getKidsPathUnderRootIn("/");
@@ -227,6 +229,29 @@ public class CuratorClient{
         runningThraedMap.put(path,ts);
         ts.start();
         addTimerTask(path);
+    }
+
+    /**
+     * 将传入的List跟已有的维度进行比较
+     * 如果有不同，那么根据不同去进行更改
+     * 只有可能是MaxVisitValue改变，因为，传入的维度都加了_M,_S,_D,_H等后缀，所以每一种类型的FlTimeSpanMS都是固定的
+     * @param flControlBeans
+     */
+    private void updateNodes(List<FlControlBean> flControlBeans){
+        for (FlControlBean flControlBean : flControlBeans){
+            if (dimensionFlctrlCurrentHashMap.get(flControlBean.getDimension()) != null){
+                if (dimensionFlctrlCurrentHashMap.get(flControlBean.getDimension()).getMaxVisitValue() != flControlBean.getMaxVisitValue()){
+                    dimensionFlctrlCurrentHashMap.get(flControlBean.getDimension()).setMaxVisitValue(flControlBean.getMaxVisitValue());
+                }
+                //只有可能是MaxVisitValue改变，因为，传入的维度都加了_M,_S,_D,_H等后缀，所以每一种类型的FlTimeSpanMS都是固定的
+                //但是为了普遍的使用其他的使用者，所以这里FlTimeSpanMS也是支持修改的
+                if (dimensionFlctrlCurrentHashMap.get(flControlBean.getDimension()).getFlTimeSpanMS() != flControlBean.getFlTimeSpanMS()){
+                    dimensionFlctrlCurrentHashMap.get(flControlBean.getDimension()).setFlTimeSpanMS(flControlBean.getFlTimeSpanMS());
+                    cancelTimerTask(flControlBean.getDimension());
+                    addTimerTask(flControlBean.getDimension());
+                }
+            }
+        }
     }
 
     /**
