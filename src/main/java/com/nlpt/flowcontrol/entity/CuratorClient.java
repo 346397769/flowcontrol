@@ -12,6 +12,8 @@ import org.apache.zookeeper.ZooDefs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.InetAddress;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -51,7 +53,10 @@ public class CuratorClient{
     private Map<String,SettingZero> timerTaskMap = new ConcurrentHashMap<String,SettingZero>();
 
     //初始化完节点的标志，以供成为leader之后的定时任务执行
-    private boolean initNodesDoneFlag = false;
+    private AtomicBoolean initNodesDoneFlag = new AtomicBoolean(false);
+
+    //是否是第一次初始化
+    private AtomicBoolean firstInitFlag = new AtomicBoolean(true);
 
     //获取leader时的锁，该锁将会在失去leader时被释放
     private String LeaderLock = "LEADER_LOCK";
@@ -92,7 +97,7 @@ public class CuratorClient{
     }
 
     public boolean isInitNodesDoneFlag() {
-        return initNodesDoneFlag;
+        return initNodesDoneFlag.get();
     }
 
 
@@ -132,20 +137,18 @@ public class CuratorClient{
      */
     private void initCuratorNodes(List<FlControlBean> flControlBeans){
         try {
-            // 首先必须初始化myPath，因为每个维度下都要用这个路径
-            // 程序运行到这里，如果是重新初始化，这时候如果myPath一定不是null ，要去执行增删操作
-            // 如果myPath==null 那么表明这个程序是第一次被运行，第一次初始化，那么就把传入维度初始化就可以了。
-            if (myPath == null || myPath.equals("")){
-                myPath = UUID.randomUUID().toString().replace("-","");
-                for (FlControlBean flControlBean:flControlBeans){
-                    FlControlBean flControlBeanInit = new FlControlBean(flControlBean.getDimension(),flControlBean.getMaxVisitValue(),flControlBean.getFlTimeSpanMS());
-                    flControlBeanInit.setMyPath("/"+flControlBeanInit.getDimension()+"/"+myPath);
-                    dimensionFlctrlCurrentHashMap.put(flControlBeanInit.getDimension(),flControlBeanInit);
+
+            // 第一次初始化走这里
+            if (firstInitFlag.get()) {
+                for (FlControlBean flControlBean : flControlBeans) {
+                    FlControlBean flControlBeanInit = new FlControlBean(flControlBean.getDimension(), flControlBean.getMaxVisitValue(), flControlBean.getFlTimeSpanMS());
+                    flControlBeanInit.setMyPath("/" + flControlBeanInit.getDimension() + "/" + myPath);
+                    dimensionFlctrlCurrentHashMap.put(flControlBeanInit.getDimension(), flControlBeanInit);
                     initOneNodes(flControlBeanInit.getDimension());
+                    firstInitFlag.set(false);
                 }
-
-
             }else {
+                //第n次初始化走这里  n > 1
                 //传入的维度集合
                 List<String> listB = new ArrayList<String>();
                 //初始化维度对应map 和 获取传入的维度的集合
@@ -177,22 +180,7 @@ public class CuratorClient{
                 //删除需要删除的维度节点
                 //如果是第一次进行初始化，那么应该不会有删减操作
                 for (String s : listA){
-                    //将需要删除的维度map删除，需要停止的维度线程停止
-                    dimensionFlctrlCurrentHashMap.remove(s);
-
-                    if (curatorFramework.checkExists().forPath("/"+s) != null){
-                        curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+s);
-                    }
-
-                    //检查需要被删除的维度的线程有没有停止，没停止的话就删除
-                    if (getRunningThraedMap().get(s)!=null && getRunningThraedMap().get(s).getState() != Thread.State.TERMINATED){
-                        //提醒该线程需要结束了
-                        getRunningThraedMap().get(s).interrupt();
-                        //从正在运行的线程map中把它删除
-                        getRunningThraedMap().remove(s);
-                    }
-
-                    cancelTimerTask(s);
+                    deleteOneDimension(s);
                 }
 
                 //新增需要增加的维度节点,并为其建立临时统计叶子节点
@@ -210,12 +198,42 @@ public class CuratorClient{
                         }
                     }
                 }
-
             }
 
         } catch (Exception e) {
             log.error(e.getMessage(),e);
         }
+    }
+
+    /**
+     * 删除某一个维度需要的操作
+     * 从 dimensionFlctrlCurrentHashMap 移除
+     * 删除该节点和子节点
+     * 取消正在运行的线程 getRunningThraedMap().get(dimension).interrupt();
+     * 从正在运行的线程中移除  getRunningThraedMap().remove(dimension);
+     * leader节点取消定时任务 cancelTimerTask(dimension);
+     * @param dimension
+     * @throws Exception
+     */
+    private void deleteOneDimension(String dimension) throws Exception {
+        //将需要删除的维度map删除，需要停止的维度线程停止
+        dimensionFlctrlCurrentHashMap.remove(dimension);
+
+        if (curatorFramework.checkExists().forPath("/"+dimension) != null){
+            curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+dimension);
+        }
+
+        //检查需要被删除的维度的线程有没有停止，没停止的话就删除
+        if (getRunningThraedMap().get(dimension)!=null){
+            if (getRunningThraedMap().get(dimension).getState() != Thread.State.TERMINATED){
+                //提醒该线程需要结束了
+                getRunningThraedMap().get(dimension).interrupt();
+            }
+            //从正在运行的线程map中把它删除
+            getRunningThraedMap().remove(dimension);
+        }
+
+        cancelTimerTask(dimension);
     }
 
     private void initOneNodes(String path) throws Exception {
@@ -356,6 +374,9 @@ public class CuratorClient{
                 long numL = 0L;
                 byte[] numLbytes = IntLong2BytesUtil.long2Bytes(numL);
                 curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath(path,numLbytes);
+            }else {
+                //维度根节点也没有了，删除dimensionFlctrlCurrentHashMap 中的该维度
+                deleteOneDimension(path);
             }
         } catch (Exception e) {
             log.error(e.getMessage(),e);
@@ -487,13 +508,14 @@ public class CuratorClient{
      * 否则返回false
      * @return
      */
-    private boolean initConnect(String ZkUrlPort){
+    public boolean initConnect(){
         boolean initResult = false;
         try {
-            connectZkUrlPort = ZkUrlPort;
+            String dateString = new SimpleDateFormat("yyyy_MM_dd_HH_mm_ss_SSS").format(new Date());
+            myPath = dateString +"_" + UUID.randomUUID().toString().replace("-","").substring(0,6);
 
             RetryPolicy retryPolicy = new RetryForever(3000);
-            curatorFramework = CuratorFrameworkFactory.builder().connectString(ZkUrlPort)
+            curatorFramework = CuratorFrameworkFactory.builder().connectString(connectZkUrlPort)
                     .retryPolicy(retryPolicy).namespace(rootPath).connectionTimeoutMs(4000)
                     .build();
             //状态监听
@@ -520,16 +542,11 @@ public class CuratorClient{
      * @param flControlBeans
      */
     public void initFl(List<FlControlBean> flControlBeans){
-        //如果曾经初始化过，那么curatorFramework就不会为null，并且不需要再去连接，因为它有自己的集群自动重连操作
-        //也就是说，只有第一次初始化操作的时候会满足条件去初始化连接
-        if(curatorFramework == null){
-            initConnect(connectZkUrlPort);
-        }
 
         //根据传入的list，初始化流控节点
         initCuratorNodes(flControlBeans);
         //初始化节点成功的flag置为true
-        initNodesDoneFlag = true;
+        initNodesDoneFlag.set(true);
     }
 
     /**
