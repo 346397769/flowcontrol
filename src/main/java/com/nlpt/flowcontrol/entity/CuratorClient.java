@@ -47,9 +47,6 @@ public class CuratorClient{
     //保存当前运行的所有的<维度，线程>的map
     private Map<String,Thread> runningThraedMap = new ConcurrentHashMap<String,Thread>();
 
-    //保存需要被删除的维度
-    private  List<String> needToBeDeleteDimensions = new ArrayList<String>();
-
     //timerTaskMap 保存作为leader执行的定时任务的map
     private Map<String,SettingZero> timerTaskMap = new ConcurrentHashMap<String,SettingZero>();
 
@@ -60,7 +57,7 @@ public class CuratorClient{
     private String LeaderLock = "LEADER_LOCK";
 
     //判断自己是不是leader的标志
-    private boolean leaderFlag = false;
+    private AtomicBoolean leaderFlag = new AtomicBoolean(false);
 
 
     /**
@@ -79,15 +76,15 @@ public class CuratorClient{
 
     //根据标志，判断自己是不是leader
     public boolean isLeader(){
-        return leaderFlag;
+        return leaderFlag.get();
     }
 
     public void setLeader(){
-        leaderFlag = true;
+        leaderFlag.set(true);
     }
 
     public void setNotLeader(){
-        leaderFlag = false;
+        leaderFlag.set(false);
     }
 
     public String getLeaderLock() {
@@ -107,9 +104,6 @@ public class CuratorClient{
         return runningThraedMap;
     }
 
-    public List<String> getNeedToBeDeleteDimensions() {
-        return needToBeDeleteDimensions;
-    }
 
     public CuratorFramework getCuratorFramework() {
         return curatorFramework;
@@ -183,14 +177,19 @@ public class CuratorClient{
                 //删除需要删除的维度节点
                 //如果是第一次进行初始化，那么应该不会有删减操作
                 for (String s : listA){
-                    //将需要被删除的维度保存，以备定时检查，检查被删除了，就移除
-                    needToBeDeleteDimensions.add(s);
-
                     //将需要删除的维度map删除，需要停止的维度线程停止
                     dimensionFlctrlCurrentHashMap.remove(s);
 
                     if (curatorFramework.checkExists().forPath("/"+s) != null){
                         curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+s);
+                    }
+
+                    //检查需要被删除的维度的线程有没有停止，没停止的话就删除
+                    if (getRunningThraedMap().get(s)!=null && getRunningThraedMap().get(s).getState() != Thread.State.TERMINATED){
+                        //提醒该线程需要结束了
+                        getRunningThraedMap().get(s).interrupt();
+                        //从正在运行的线程map中把它删除
+                        getRunningThraedMap().remove(s);
                     }
 
                     cancelTimerTask(s);
@@ -525,28 +524,6 @@ public class CuratorClient{
         //也就是说，只有第一次初始化操作的时候会满足条件去初始化连接
         if(curatorFramework == null){
             initConnect(connectZkUrlPort);
-            Timer timer = new Timer();
-            timer.schedule(new TimerTask() {
-                @Override
-                public void run() {
-                    //检查需要被删除的维度的线程有没有停止，没停止的话就删除
-
-                    for (int i =0 ,len =  getNeedToBeDeleteDimensions().size(); i < len ; ++i){
-                        if (getRunningThraedMap().get(getNeedToBeDeleteDimensions().get(i))!=null &&
-                                getRunningThraedMap().get(getNeedToBeDeleteDimensions().get(i)).getState() != Thread.State.TERMINATED){
-                            //提醒该线程需要结束了
-                            getRunningThraedMap().get(getNeedToBeDeleteDimensions().get(i)).interrupt();
-                        }else {
-                            //从正在运行的线程map中把它删除
-                            getRunningThraedMap().remove(getNeedToBeDeleteDimensions().get(i));
-                            //从需要被删除的维度中移除
-                            getNeedToBeDeleteDimensions().remove(getNeedToBeDeleteDimensions().get(i));
-                            --len;
-                            --i;
-                        }
-                    }
-                }
-            },1000,1000*30);
         }
 
         //根据传入的list，初始化流控节点
@@ -589,6 +566,13 @@ public class CuratorClient{
      */
     private void wakeThreadAndAddOne(FlControlBean flControlBean){
         flControlBean.addOne2MyNum();
+
+        if (runningThraedMap.get(flControlBean.getDimension()) == null && dimensionFlctrlCurrentHashMap.get(flControlBean.getDimension()) != null){
+            Thread ts = new Thread(new DealZkNodes(flControlBean.getDimension()));
+            runningThraedMap.put(flControlBean.getDimension(),ts);
+            ts.start();
+        }
+
         if (runningThraedMap.get(flControlBean.getDimension()).getState() == Thread.State.WAITING){
             synchronized (flControlBean){
                 flControlBean.notify();
