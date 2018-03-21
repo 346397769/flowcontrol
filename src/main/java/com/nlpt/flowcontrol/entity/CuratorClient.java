@@ -145,8 +145,8 @@ public class CuratorClient{
                     flControlBeanInit.setMyPath("/" + flControlBeanInit.getDimension() + "/" + myPath);
                     dimensionFlctrlCurrentHashMap.put(flControlBeanInit.getDimension(), flControlBeanInit);
                     initOneNodes(flControlBeanInit.getDimension());
-                    firstInitFlag.set(false);
                 }
+                firstInitFlag.set(false);
             }else {
                 //第n次初始化走这里  n > 1
                 //传入的维度集合
