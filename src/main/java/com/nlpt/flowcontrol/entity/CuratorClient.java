@@ -156,9 +156,6 @@ public class CuratorClient{
                 for (FlControlBean flControlBean:flControlBeans){
                     listB.add(flControlBean.getDimension());
                 }
-
-                updateNodes(flControlBeans);
-
                 //首先获取当前根节点下的所有子节点(也就是当前所有维度)的路径，为了跟传入的值进行比较，并对当前根节点下的子节点进行更新操作（增加，或者删减）
                 //获取已有的List<String>类型的维度
                 List<String> listA = getKidsPathUnderRootIn("/");
@@ -198,10 +195,26 @@ public class CuratorClient{
                         }
                     }
                 }
+
+                updateNodes(flControlBeans);
+
             }
 
         } catch (Exception e) {
             log.error(e.getMessage(),e);
+        }
+    }
+
+    /**
+     * 获取某一个维度的阈值
+     * @param dimension
+     * @return
+     */
+    public int getFcThreshold(String dimension){
+        if (dimensionFlctrlCurrentHashMap.get(dimension) != null){
+            return dimensionFlctrlCurrentHashMap.get(dimension).getMaxVisitValue();
+        }else {
+            return -1;
         }
     }
 
@@ -297,7 +310,11 @@ public class CuratorClient{
      * @return
      */
     public long getCurrentFlow(String dimension){
-        return dimensionFlctrlCurrentHashMap.get(dimension).getLastTimeDimensionFlow();
+        if (dimensionFlctrlCurrentHashMap.get(dimension) != null){
+            return dimensionFlctrlCurrentHashMap.get(dimension).getLastTimeDimensionFlow();
+        }else {
+            return -1;
+        }
     }
 
     /**

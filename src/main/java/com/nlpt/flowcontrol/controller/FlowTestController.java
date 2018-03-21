@@ -22,8 +22,8 @@ public class FlowTestController {
         curatorClient = new CuratorClient("BASE","10.124.134.37:2181,10.124.134.38:2181,10.124.134.39:2181,10.124.128.195:2181,10.124.128.196:2181");
         List<FlControlBean> list = new ArrayList<FlControlBean>();
 //        list.add(new FlControlBean("AOP",500,1000));
-//        list.add(new FlControlBean("CBSS",1000,1000));
-        list.add(new FlControlBean("TEST",1000,1000*60*60));
+        list.add(new FlControlBean("CBSS",1000,1000));
+//        list.add(new FlControlBean("TEST",1000,1000*60*60));
         curatorClient.initConnect();
         curatorClient.initFl(list);
     }
