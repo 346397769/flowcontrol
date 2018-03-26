@@ -11,9 +11,6 @@ import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.net.InetAddress;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -119,9 +116,10 @@ public class CuratorClient{
     }
 
     //根据命名空间和连接串生成实例
-    public CuratorClient(String nameSpace,String connectZkUrlPort){
+    public CuratorClient(String nameSpace,String connectZkUrlPort,String myPath){
         this.rootPath = nameSpace;
         this.connectZkUrlPort = connectZkUrlPort;
+        this.myPath = myPath;
     }
 
 
@@ -265,6 +263,7 @@ public class CuratorClient{
      * 将传入的List跟已有的维度进行比较
      * 如果有不同，那么根据不同去进行更改
      * 只有可能是MaxVisitValue改变，因为，传入的维度都加了_M,_S,_D,_H等后缀，所以每一种类型的FlTimeSpanMS都是固定的
+     * 并将 runningThraedMap  dimensionFlctrlCurrentHashMap 拉齐
      * @param flControlBeans
      */
     private void updateNodes(List<FlControlBean> flControlBeans){
@@ -279,6 +278,12 @@ public class CuratorClient{
                     dimensionFlctrlCurrentHashMap.get(flControlBean.getDimension()).setFlTimeSpanMS(flControlBean.getFlTimeSpanMS());
                     cancelTimerTask(flControlBean.getDimension());
                     addTimerTask(flControlBean.getDimension());
+                }
+                //将 runningThraedMap  dimensionFlctrlCurrentHashMap 拉齐
+                if (runningThraedMap.get(flControlBean.getDimension()) == null && dimensionFlctrlCurrentHashMap.get(flControlBean.getDimension()) != null){
+                    Thread ts = new Thread(new DealZkNodes(flControlBean.getDimension()));
+                    runningThraedMap.put(flControlBean.getDimension(),ts);
+                    ts.start();
                 }
             }
         }
@@ -497,7 +502,7 @@ public class CuratorClient{
                 }else {
                     //此时连接不上zookeeper那么休息一会
                     try {
-                        Thread.sleep(4000);
+                        Thread.sleep(1000);
                     } catch (InterruptedException e) {
                         log.error(e.getMessage(),e);
                     }
@@ -514,8 +519,6 @@ public class CuratorClient{
     public boolean initConnect(){
         boolean initResult = false;
         try {
-            String dateString = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
-            myPath = dateString +"_" + UUID.randomUUID().toString().replace("-","").substring(0,8);
 
             RetryPolicy retryPolicy = new RetryForever(3000);
             curatorFramework = CuratorFrameworkFactory.builder().connectString(connectZkUrlPort)
@@ -586,17 +589,14 @@ public class CuratorClient{
      */
     private void wakeThreadAndAddOne(FlControlBean flControlBean){
         flControlBean.addOne2MyNum();
-
-        if (runningThraedMap.get(flControlBean.getDimension()) == null && dimensionFlctrlCurrentHashMap.get(flControlBean.getDimension()) != null){
-            Thread ts = new Thread(new DealZkNodes(flControlBean.getDimension()));
-            runningThraedMap.put(flControlBean.getDimension(),ts);
-            ts.start();
-        }
-
-        if (runningThraedMap.get(flControlBean.getDimension()).getState() == Thread.State.WAITING){
-            synchronized (flControlBean){
-                flControlBean.notify();
+        try {
+            if (runningThraedMap.get(flControlBean.getDimension()).getState() == Thread.State.WAITING) {
+                synchronized (flControlBean) {
+                    flControlBean.notify();
+                }
             }
+        }catch (NullPointerException e){
+            log.error("节点初始化异常，等待拉齐即可",e.getMessage(),e);
         }
     }
 
