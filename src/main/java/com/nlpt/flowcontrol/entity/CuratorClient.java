@@ -340,15 +340,11 @@ public class CuratorClient{
             long currentNum = IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(flControlBean.getMyPath()));
             curatorFramework.setData().forPath(flControlBean.getMyPath(),IntLong2BytesUtil.long2Bytes(currentNum+num));
         }catch (KeeperException.NoNodeException e) {
-            if (checkAndRecreateNodes(flControlBean.getMyPath())){
+            if (checkAndRecreateNodes(flControlBean.getDimension())){
                 addMyNum2NodeValue(flControlBean,num);
             }else {
                 log.error("节点不同步造成的异常"+e.getMessage(),e);
             }
-        }catch (KeeperException.BadVersionException e){
-            log.error(e.getMessage(),e);
-            //出现版本号异常是因为增加值的时候，读写之间遇到了被设置为0，致使版本号不对,再来一遍就可以成功
-            addMyNum2NodeValue(flControlBean,num);
         }catch (Exception e) {
             log.error(e.getMessage(),e);
         }
@@ -371,30 +367,20 @@ public class CuratorClient{
 
     /**
      * 此方法检查节点的父节点是否存在，如果存在，那么重建子节点返回true，如果不存在，那么不操作返回false。
-     * @param path 包含根路径的path
+     * @param path 维度
      * @return
      */
     private boolean checkAndRecreateNodes(String path){
         boolean exist = false;
-        String[] pathes = path.split("/");
+
         try {
-            int countPath = 0;
-            for (String p : pathes){
-                countPath++;
-                if (curatorFramework.checkExists().forPath("/"+p) == null){
-                    break;
-                }
-            }
-            if (countPath == pathes.length){
-                //这时候说明仅仅是子节点没有了，可以重新建立
+            if(dimensionFlctrlCurrentHashMap.get(path) != null && curatorFramework.checkExists().forPath("/"+path) != null){
                 exist = true;
                 long numL = 0L;
                 byte[] numLbytes = IntLong2BytesUtil.long2Bytes(numL);
-                curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath(path,numLbytes);
-            }else {
-                //维度根节点也没有了，删除dimensionFlctrlCurrentHashMap 中的该维度
-                deleteOneDimension(path);
+                curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath(dimensionFlctrlCurrentHashMap.get(path).getMyPath(),numLbytes);
             }
+
         } catch (Exception e) {
             log.error(e.getMessage(),e);
         }
@@ -528,8 +514,8 @@ public class CuratorClient{
     public boolean initConnect(){
         boolean initResult = false;
         try {
-            String dateString = new SimpleDateFormat("yyyy_MM_dd_HH_mm_ss_SSS").format(new Date());
-            myPath = dateString +"_" + UUID.randomUUID().toString().replace("-","").substring(0,6);
+            String dateString = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
+            myPath = dateString +"_" + UUID.randomUUID().toString().replace("-","").substring(0,8);
 
             RetryPolicy retryPolicy = new RetryForever(3000);
             curatorFramework = CuratorFrameworkFactory.builder().connectString(connectZkUrlPort)
