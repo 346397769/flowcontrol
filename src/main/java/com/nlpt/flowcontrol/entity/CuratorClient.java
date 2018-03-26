@@ -58,8 +58,8 @@ public class CuratorClient{
     //获取leader时的锁，该锁将会在失去leader时被释放
     private String LeaderLock = "LEADER_LOCK";
 
-    //判断自己是不是leader的标志
-    private AtomicBoolean leaderFlag = new AtomicBoolean(false);
+    //leader选举客户端
+    private LeaderSelectorClient leaderSelectorClient = null;
 
 
     /**
@@ -74,19 +74,6 @@ public class CuratorClient{
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    //根据标志，判断自己是不是leader
-    public boolean isLeader(){
-        return leaderFlag.get();
-    }
-
-    public void setLeader(){
-        leaderFlag.set(true);
-    }
-
-    public void setNotLeader(){
-        leaderFlag.set(false);
     }
 
     public String getLeaderLock() {
@@ -135,9 +122,13 @@ public class CuratorClient{
      */
     private void initCuratorNodes(List<FlControlBean> flControlBeans){
         try {
-
             // 第一次初始化走这里
             if (firstInitFlag.get()) {
+
+                while(curatorFramework.checkExists().forPath("/leaderSelectSuccess") == null){
+                    Thread.sleep(1000);
+                }
+
                 for (FlControlBean flControlBean : flControlBeans) {
                     FlControlBean flControlBeanInit = new FlControlBean(flControlBean.getDimension(), flControlBean.getMaxVisitValue(), flControlBean.getFlTimeSpanMS());
                     flControlBeanInit.setMyPath("/" + flControlBeanInit.getDimension() + "/" + myPath);
@@ -159,6 +150,7 @@ public class CuratorClient{
                 List<String> listA = getKidsPathUnderRootIn("/");
                 //将固定的leader选举节点移除
                 listA.remove("leader");
+                listA.remove("leaderSelectSuccess");
 
                 //已有的维度集合的copy
                 List<String> copyListA = new ArrayList<String>(listA);
@@ -230,9 +222,7 @@ public class CuratorClient{
         //将需要删除的维度map删除，需要停止的维度线程停止
         dimensionFlctrlCurrentHashMap.remove(dimension);
 
-        if (curatorFramework.checkExists().forPath("/"+dimension) != null){
-            curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+dimension);
-        }
+        deleteDimensionNode(dimension);
 
         //检查需要被删除的维度的线程有没有停止，没停止的话就删除
         if (getRunningThraedMap().get(dimension)!=null){
@@ -248,15 +238,34 @@ public class CuratorClient{
     }
 
     private void initOneNodes(String path) throws Exception {
-        //创建新增的根节点
-        if (curatorFramework.checkExists().forPath("/"+path) == null){
-            curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/"+path,path.getBytes());
-        }
+        createDimensionNode(path);
         //不用添加叶子节点，在请求的时候会自动添加节点
         Thread ts = new Thread(new DealZkNodes(path));
         runningThraedMap.put(path,ts);
         ts.start();
         addTimerTask(path);
+    }
+
+    /**
+     * 创建持久化的维度节点
+     * @param path  维度
+     */
+    private void createDimensionNode(String path) throws Exception {
+        //创建新增的根节点
+        if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+path) == null){
+            System.out.println("作为leader创建节点"+path);
+            curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/"+path,path.getBytes());
+        }
+    }
+
+    /**
+     * 删除维度节点
+     * @param dimension 维度
+     */
+    private void deleteDimensionNode(String dimension) throws Exception {
+        if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+dimension) != null){
+            curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+dimension);
+        }
     }
 
     /**
@@ -379,13 +388,19 @@ public class CuratorClient{
         boolean exist = false;
 
         try {
-            if(dimensionFlctrlCurrentHashMap.get(path) != null && curatorFramework.checkExists().forPath("/"+path) != null){
-                exist = true;
-                long numL = 0L;
-                byte[] numLbytes = IntLong2BytesUtil.long2Bytes(numL);
-                curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath(dimensionFlctrlCurrentHashMap.get(path).getMyPath(),numLbytes);
-            }
+            if(dimensionFlctrlCurrentHashMap.get(path) != null){
 
+                // 如果某一时刻由于leader不存在，导致只初始化了 dimensionFlctrlCurrentHashMap 而没有创建节点，那么在这里拉齐创建
+                createDimensionNode(path);
+
+                // 由于leader的定时任务删除的子节点，在这里创建
+                if (curatorFramework.checkExists().forPath("/"+path) != null){
+                    exist = true;
+                    long numL = 0L;
+                    byte[] numLbytes = IntLong2BytesUtil.long2Bytes(numL);
+                    curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath(dimensionFlctrlCurrentHashMap.get(path).getMyPath(),numLbytes);
+                }
+            }
         } catch (Exception e) {
             log.error(e.getMessage(),e);
         }
@@ -505,6 +520,7 @@ public class CuratorClient{
                         Thread.sleep(1000);
                     } catch (InterruptedException e) {
                         log.error(e.getMessage(),e);
+                        flag = false;
                     }
                 }
             }
@@ -528,7 +544,7 @@ public class CuratorClient{
             MyConnectionStateListener stateListener = new MyConnectionStateListener();
             curatorFramework.getConnectionStateListenable().addListener(stateListener);
 
-            LeaderSelectorClient leaderSelectorClient = new LeaderSelectorClient(this,"/leader");
+            leaderSelectorClient = new LeaderSelectorClient(this,"/leader");
 
             curatorFramework.start();
 
@@ -608,7 +624,7 @@ public class CuratorClient{
         //当我是leader，并且没有这个维度的定时任务的时候，我才会去添加这个定时任务
         //因为在获得leader的时候，会根据维度去进行定时任务的初始化，同步内存库的时候，也会进行定时任务的初始化，这样避免冲突，在初始化的时候添加了定时任务，
         // 在leader那里就不用重复添加了
-        if (isLeader() && timerTaskMap.get(dimension) == null){
+        if (leaderSelectorClient.isLeader() && timerTaskMap.get(dimension) == null){
             timerTaskMap.put(dimension,new SettingZero(dimensionFlctrlCurrentHashMap.get(dimension),CuratorClient.this));
             timerTaskMap.get(dimension).startSetting0TimerTask();
         }

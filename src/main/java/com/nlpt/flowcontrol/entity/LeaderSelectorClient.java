@@ -3,6 +3,8 @@ package com.nlpt.flowcontrol.entity;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.leader.LeaderSelector;
 import org.apache.curator.framework.recipes.leader.LeaderSelectorListenerAdapter;
+import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.ZooDefs;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -38,6 +40,14 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
         leaderSelector.start();
     }
 
+    /**
+     * 判断当前节点是不是leader
+     * @return
+     */
+    public boolean isLeader(){
+        return leaderSelector.hasLeadership();
+    }
+
 
 
     /**
@@ -55,9 +65,11 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
     @Override
     public void takeLeadership(CuratorFramework curatorFramework) throws Exception {
 
-        curatorClient.setLeader();
-
         System.out.println("我是leader！");
+
+        if (curatorFramework.checkExists().forPath("/leaderSelectSuccess") == null){
+            curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath("/leaderSelectSuccess","leaderSelectSuccess".getBytes());
+        }
 
         //给每个维度增加定时任务
         while(true){
@@ -70,12 +82,12 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
             Thread.sleep(1000);
         }
 
-
         synchronized (curatorClient.getLeaderLock()){
             curatorClient.getLeaderLock().wait();
         }
 
-        curatorClient.setNotLeader();
+        curatorFramework.delete().forPath("/leaderSelectSuccess");
+
         System.out.println("我失去leader了!");
     }
 
