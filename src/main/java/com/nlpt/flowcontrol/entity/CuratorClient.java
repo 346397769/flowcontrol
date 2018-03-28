@@ -137,11 +137,7 @@ public class CuratorClient{
                 // 传入的维度集合
                 List<String> list1 = new ArrayList<String>();
                 //获取已有的List<String>类型的维度集合
-                List<String> list2 = getKidsPathUnderRootIn("/");
-
-                //将固定的leader选举节点移除
-                list2.remove("leader");
-                list2.remove("leaderSelectSuccess");
+                List<String> list2 = new ArrayList<String>();
 
                 for (FlControlBean flControlBean : flControlBeans) {
                     FlControlBean flControlBeanInit = new FlControlBean(flControlBean.getDimension(), flControlBean.getMaxVisitValue(), flControlBean.getFlTimeSpanMS());
@@ -151,11 +147,19 @@ public class CuratorClient{
                     list1.add(flControlBean.getDimension());
                 }
 
-                list2.removeAll(list1);
+                if (leaderSelectorClient.isLeader()){
+                    list2 = getKidsPathUnderRootIn("/");
+                    //将固定的leader选举节点移除
+                    list2.remove("leader");
+                    list2.remove("leaderSelectSuccess");
+                    list2.removeAll(list1);
 
-                // 将多余的节点删除掉
-                for (String s: list2){
-                    deleteDimensionNode(s);
+                    // 将多余的节点删除掉
+                    // 因为是第一次初始化的时候，所以也没有timerTask 还有为这个维度起的线程，只需要删除节点就可以清理干净了
+                    //而这一项工作也只有leader需要做，其他的节点不需要做
+                    for (String s: list2){
+                        deleteDimensionNode(s);
+                    }
                 }
 
                 firstInitFlag.set(false);
@@ -168,11 +172,16 @@ public class CuratorClient{
                  之所以会出现这种情况，是因为某一刻leader节点不存在了，但是又新增了节点，这就造成了本地和远程不同步，本地节点多，远程节点少 ，并且没有这个维度的定时任务
                  */
 
+                //获取已有的List<String>类型的维度
+                List<String> listA = new ArrayList<String>();
+                // 对于没有建立的节点进行补偿建立和timertask的补偿创建 这里之所以灭有加 if (leaderSelectorClient.isLeader())
+                // 是因为listA也需要用这个地方进行已有节点的初始化
                 for (String s : dimensionFlctrlCurrentHashMap.keySet()){
                     if (curatorFramework.checkExists().forPath("/"+s) == null){
                         createDimensionNode(s);
                     }
                     addTimerTask(s);
+                    listA.add(s);
                 }
 
                 //传入的维度集合
@@ -183,12 +192,6 @@ public class CuratorClient{
                     listB.add(flControlBean.getDimension());
                 }
                 //首先获取当前根节点下的所有子节点(也就是当前所有维度)的路径，为了跟传入的值进行比较，并对当前根节点下的子节点进行更新操作（增加，或者删减）
-                //获取已有的List<String>类型的维度
-                List<String> listA = getKidsPathUnderRootIn("/");
-
-                //将固定的leader选举节点移除
-                listA.remove("leader");
-                listA.remove("leaderSelectSuccess");
 
                 //已有的维度集合的copy
                 List<String> copyListA = new ArrayList<String>(listA);
