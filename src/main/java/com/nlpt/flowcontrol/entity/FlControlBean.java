@@ -16,10 +16,6 @@ public class FlControlBean {
     private String myPath;
     //访问申请的开关
     private AtomicBoolean onOff = new AtomicBoolean(true);
-    //上一次重置自己临时的节点为0的毫秒数
-    private long lastTimeSet02MyTempZkNode = 0L;
-    //上一次统计的本维度的流量值
-    private long lastTimeDimensionFlow = 0;
 
     //myPath临时节点的路径，在传入CuratorClient的时候会自动生成，所以不用传入
     public FlControlBean(String dimension, int maxVisitValue, int flTimeSpanMS) {
@@ -30,23 +26,6 @@ public class FlControlBean {
     }
 
     public FlControlBean() {
-    }
-
-
-    public long getLastTimeDimensionFlow() {
-        return lastTimeDimensionFlow;
-    }
-
-    public void setLastTimeDimensionFlow(long lastTimeDimensionFlow) {
-        this.lastTimeDimensionFlow = lastTimeDimensionFlow;
-    }
-
-    public Long getLastTimeSet02MyTempZkNode() {
-        return lastTimeSet02MyTempZkNode;
-    }
-
-    public void setLastTimeSet02MyTempZkNode(Long lastTimeSet02MyTempZkNode) {
-        this.lastTimeSet02MyTempZkNode = lastTimeSet02MyTempZkNode;
     }
 
     public boolean getOnOff() {

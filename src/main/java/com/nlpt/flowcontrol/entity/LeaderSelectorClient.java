@@ -4,7 +4,8 @@ import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.leader.LeaderSelector;
 import org.apache.curator.framework.recipes.leader.LeaderSelectorListenerAdapter;
 import org.apache.zookeeper.CreateMode;
-import org.apache.zookeeper.ZooDefs;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -20,6 +21,8 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
     private CuratorClient curatorClient;
 
     private String leaderPath;
+
+    private static final Logger log = LoggerFactory.getLogger(LeaderSelectorClient.class);
 
     public LeaderSelectorClient(CuratorClient curatorClientIn,String path){
 
@@ -48,6 +51,18 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
         return leaderSelector.hasLeadership();
     }
 
+    /**
+     * 主动放弃leader
+     */
+    public void interruptLeadership(){
+        leaderSelector.interruptLeadership();
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            log.error(e.getMessage(),e);
+        }
+    }
+
 
 
     /**
@@ -66,6 +81,9 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
     public void takeLeadership(CuratorFramework curatorFramework) throws Exception {
 
         System.out.println("我是leader！");
+        if (curatorFramework.checkExists().forPath("/leaderSelectSuccess") != null){
+            curatorFramework.delete().forPath("/leaderSelectSuccess");
+        }
 
         if (curatorFramework.checkExists().forPath("/leaderSelectSuccess") == null){
             curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath("/leaderSelectSuccess","leaderSelectSuccess".getBytes());

@@ -32,7 +32,7 @@ public class CuratorClient{
     private String myPath;
 
     //流控客户端是否连接到服务器
-    private AtomicBoolean connectToServer = new AtomicBoolean(true);
+    private AtomicBoolean connectToServer = new AtomicBoolean(false);
 
     //要连接的zk的url和端口
     private  String connectZkUrlPort;
@@ -67,12 +67,16 @@ public class CuratorClient{
      */
     public void deleteDimensionNodes(FlControlBean flControlBean){
         try {
+            // 如果此时有异常情况导致维度节点不存在，那么就返回，不执行下面的操作
+            if (curatorFramework.checkExists().forPath("/"+flControlBean.getDimension()) == null){
+                return;
+            }
             List<String> pathes = getKidsPathUnderRootIn("/"+flControlBean.getDimension());
             for (String path : pathes){
                 curatorFramework.delete().forPath("/"+flControlBean.getDimension()+"/"+path);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error(e.getMessage(),e);
         }
     }
 
@@ -125,19 +129,52 @@ public class CuratorClient{
             // 第一次初始化走这里
             if (firstInitFlag.get()) {
 
+                // 等待leader选举结束再进行第一次初始化，这样能让所有的节点同步
                 while(curatorFramework.checkExists().forPath("/leaderSelectSuccess") == null){
                     Thread.sleep(1000);
                 }
+
+                // 传入的维度集合
+                List<String> list1 = new ArrayList<String>();
+                //获取已有的List<String>类型的维度集合
+                List<String> list2 = getKidsPathUnderRootIn("/");
+
+                //将固定的leader选举节点移除
+                list2.remove("leader");
+                list2.remove("leaderSelectSuccess");
 
                 for (FlControlBean flControlBean : flControlBeans) {
                     FlControlBean flControlBeanInit = new FlControlBean(flControlBean.getDimension(), flControlBean.getMaxVisitValue(), flControlBean.getFlTimeSpanMS());
                     flControlBeanInit.setMyPath("/" + flControlBeanInit.getDimension() + "/" + myPath);
                     dimensionFlctrlCurrentHashMap.put(flControlBeanInit.getDimension(), flControlBeanInit);
                     initOneNodes(flControlBeanInit.getDimension());
+                    list1.add(flControlBean.getDimension());
                 }
+
+                list2.removeAll(list1);
+
+                // 将多余的节点删除掉
+                for (String s: list2){
+                    deleteDimensionNode(s);
+                }
+
                 firstInitFlag.set(false);
             }else {
                 //第n次初始化走这里  n > 1
+
+                /*
+                 dimensionFlctrlCurrentHashMap 中的维度的中有但是 远程节点没有的 要创建
+                 某个维度没有定时删除节点的定时任务，那么要创建
+                 之所以会出现这种情况，是因为某一刻leader节点不存在了，但是又新增了节点，这就造成了本地和远程不同步，本地节点多，远程节点少 ，并且没有这个维度的定时任务
+                 */
+
+                for (String s : dimensionFlctrlCurrentHashMap.keySet()){
+                    if (curatorFramework.checkExists().forPath("/"+s) == null){
+                        createDimensionNode(s);
+                    }
+                    addTimerTask(s);
+                }
+
                 //传入的维度集合
                 List<String> listB = new ArrayList<String>();
                 //初始化维度对应map 和 获取传入的维度的集合
@@ -148,6 +185,7 @@ public class CuratorClient{
                 //首先获取当前根节点下的所有子节点(也就是当前所有维度)的路径，为了跟传入的值进行比较，并对当前根节点下的子节点进行更新操作（增加，或者删减）
                 //获取已有的List<String>类型的维度
                 List<String> listA = getKidsPathUnderRootIn("/");
+
                 //将固定的leader选举节点移除
                 listA.remove("leader");
                 listA.remove("leaderSelectSuccess");
@@ -250,12 +288,19 @@ public class CuratorClient{
      * 创建持久化的维度节点
      * @param path  维度
      */
-    private void createDimensionNode(String path) throws Exception {
+    private boolean createDimensionNode(String path){
+        boolean createResult = false;
         //创建新增的根节点
-        if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+path) == null){
-            System.out.println("作为leader创建节点"+path);
-            curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/"+path,path.getBytes());
+        try {
+            if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+path) == null && dimensionFlctrlCurrentHashMap.get(path) != null){
+                System.out.println("作为leader创建节点"+path);
+                curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/"+path,path.getBytes());
+                createResult = true;
+            }
+        } catch (Exception e) {
+            log.error(e.getMessage(),e);
         }
+        return createResult;
     }
 
     /**
@@ -263,7 +308,8 @@ public class CuratorClient{
      * @param dimension 维度
      */
     private void deleteDimensionNode(String dimension) throws Exception {
-        if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+dimension) != null){
+        if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+dimension) != null && dimensionFlctrlCurrentHashMap.get(dimension) == null){
+            System.out.println("作为leader删除节点"+dimension);
             curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+dimension);
         }
     }
@@ -302,6 +348,16 @@ public class CuratorClient{
      * 获取某个维度路径下的所有节点的存的数的和
      */
     public long getZkServerCurrentNumLIn(FlControlBean flControlBean){
+
+        // 如果此时有异常情况导致维度节点不存在，那么就返回，不执行下面的操作
+        try {
+            if (curatorFramework.checkExists().forPath("/"+flControlBean.getDimension()) == null){
+                return 0;
+            }
+        } catch (Exception e) {
+            log.error(e.getMessage(),e);
+        }
+
         //获取所有子节点的路径  这里的路径是不包含上一级的路径的不全路径 例如 全路径是  /dimension/myPath   这里获取的是 myPath的List<String>
         List<String> kidsPathes = getKidsPathUnderRootIn("/"+flControlBean.getDimension());
         long numCount = 0L;
@@ -310,25 +366,13 @@ public class CuratorClient{
             //getNodeValue 用这个方法
             try {
                 numCount = numCount + getNodeValue("/"+flControlBean.getDimension()+"/"+pathes);
-            } catch (Exception e) {
-                log.error("获取节点"+pathes+"数据失败，该节点可能由于删除时间到被删除，或者客户端断线而已经不存在",e.getMessage(),e);
+            }catch (Exception e) {
+                // 这里报异常的可能是，节点断线，节点被定时任务删除，维度节点由于leader异常消失时进行增加而不存在
+                // 但是这里不需要重建节点，因为在 addMyNum2NodeValue 的时候已经检查重建了
+                log.error("获取节点"+pathes+"数据失败",e.getMessage(),e);
             }
         }
-        flControlBean.setLastTimeDimensionFlow(numCount);
         return numCount;
-    }
-
-    /**
-     * 获取上一次统计的当前流量
-     * @param dimension
-     * @return
-     */
-    public long getCurrentFlow(String dimension){
-        if (dimensionFlctrlCurrentHashMap.get(dimension) != null){
-            return dimensionFlctrlCurrentHashMap.get(dimension).getLastTimeDimensionFlow();
-        }else {
-            return -1;
-        }
     }
 
     /**
@@ -346,11 +390,17 @@ public class CuratorClient{
      * 往zkNode节点+当前缓存的本地访问数
      * org.apache.zookeeper.KeeperException$BadVersionException 这个异常表示节点版本号不对
      */
-    public  void  addMyNum2NodeValue(FlControlBean flControlBean,int num){
+    private void addMyNum2NodeValue(FlControlBean flControlBean,int num){
         try {
 //            int version = curatorFramework.checkExists().forPath(flControlBean.getMyPath()).getVersion();
 //            long currentNum = IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(flControlBean.getMyPath()));
 //            curatorFramework.setData().withVersion(version).forPath(flControlBean.getMyPath(),IntLong2BytesUtil.long2Bytes(currentNum+num));
+            // 如果某一时刻由于leader不存在，导致只初始化了 dimensionFlctrlCurrentHashMap 而没有创建节点，那么在这里拉齐创建
+
+            if (curatorFramework.checkExists().forPath("/"+flControlBean.getDimension()) == null){
+               return;
+            }
+
             long currentNum = IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(flControlBean.getMyPath()));
             curatorFramework.setData().forPath(flControlBean.getMyPath(),IntLong2BytesUtil.long2Bytes(currentNum+num));
         }catch (KeeperException.NoNodeException e) {
@@ -389,9 +439,6 @@ public class CuratorClient{
 
         try {
             if(dimensionFlctrlCurrentHashMap.get(path) != null){
-
-                // 如果某一时刻由于leader不存在，导致只初始化了 dimensionFlctrlCurrentHashMap 而没有创建节点，那么在这里拉齐创建
-                createDimensionNode(path);
 
                 // 由于leader的定时任务删除的子节点，在这里创建
                 if (curatorFramework.checkExists().forPath("/"+path) != null){
@@ -458,7 +505,7 @@ public class CuratorClient{
 
     /**
      * 内部类，用来处理zookeeper的节点值
-     * 如果本地缓存有值，那么把它加进zookeeper节点里，如果没有，那么
+     * 如果本地缓存有值，那么把它加进zookeeper节点里，如果没有，那么waiting，等待被唤醒
      */
     class DealZkNodes implements Runnable{
 
@@ -500,7 +547,7 @@ public class CuratorClient{
                             //这里之所以用num而不用flControlBean存的数，是因为很可能在使用flControlBean存的数的过程中，它的值又遭到改变
                             addMyNum2NodeValue(flControlBean,num);
                             //如果此时超过限制，那么关闭开关
-                            if (getZkServerCurrentNumLIn(flControlBean) > flControlBean.getMaxVisitValue()) {
+                            if (flControlBean.getMaxVisitValue() > 0 && getZkServerCurrentNumLIn(flControlBean) > flControlBean.getMaxVisitValue()) {
                                 flControlBean.setOff();
                             }
                         }else {
@@ -590,7 +637,7 @@ public class CuratorClient{
             wakeThreadAndAddOne(flControlBean);
             return FlStatus.OK;
         }else {
-            if (getZkServerCurrentNumLIn(flControlBean) < flControlBean.getMaxVisitValue()) {
+            if (flControlBean.getMaxVisitValue() > 0 && getZkServerCurrentNumLIn(flControlBean) < flControlBean.getMaxVisitValue()) {
                 flControlBean.setOn();
                 wakeThreadAndAddOne(flControlBean);
                 return FlStatus.OK;
@@ -639,6 +686,51 @@ public class CuratorClient{
         if (timerTaskMap.get(dimension)!=null){
             timerTaskMap.get(dimension).cancelTimerTask();
             timerTaskMap.remove(dimension);
+        }
+    }
+
+    /**
+     * 判断当前节点是否是leader节点
+     * @return
+     */
+    public FlStatus isLeader(){
+        if (getConnectToServer()){
+            if (leaderSelectorClient.isLeader()){
+                return FlStatus.IS_LEADER;
+            }else {
+                return FlStatus.NOT_LEADER;
+            }
+        }else {
+            return FlStatus.LOST_CONNECT;
+        }
+    }
+
+    /**
+     * 主动放弃leader
+     */
+    public FlStatus interruptLeadership(){
+        if (getConnectToServer()){
+            if (leaderSelectorClient.isLeader()){
+                leaderSelectorClient.interruptLeadership();
+                return FlStatus.OK;
+            }else {
+                return FlStatus.NOT_LEADER;
+            }
+        }else {
+            return FlStatus.LOST_CONNECT;
+        }
+    }
+
+    /**
+     * 统计的当前流量
+     * @param dimension
+     * @return
+     */
+    public long getCurrentFlow(String dimension){
+        if (dimensionFlctrlCurrentHashMap.get(dimension) != null){
+            return getZkServerCurrentNumLIn(dimensionFlctrlCurrentHashMap.get(dimension));
+        }else {
+            return -1;
         }
     }
 }
