@@ -3,8 +3,10 @@ package com.nlpt.flowcontrol.utils;
 import com.nlpt.flowcontrol.entity.CuratorClient;
 import com.nlpt.flowcontrol.entity.FlStatus;
 import com.nlpt.flowcontrol.entity.FlControlBean;
+import org.apache.curator.utils.CloseableUtils;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -13,7 +15,13 @@ public class FlowControlUtil {
 
     static {
         String dateString = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
-        curatorClient = new CuratorClient("BASE","10.124.134.37:2181,10.124.134.38:2181,10.124.134.39:2181,10.124.128.195:2181,10.124.128.196:2181",dateString);
+        curatorClient = new CuratorClient("BASE","10.124.134.37:2181",dateString);
+        List<FlControlBean> list = new ArrayList<FlControlBean>();
+//        list.add(new FlControlBean("AOP",500,1000));
+        list.add(new FlControlBean("CBSS",1000,1000));
+        list.add(new FlControlBean("TEST",1000,1000*60*60));
+        curatorClient.initConnect();
+        curatorClient.initFl(list);
     }
 
     /**
@@ -32,5 +40,13 @@ public class FlowControlUtil {
      */
     public static FlStatus doFlowControl(String dimension){
         return curatorClient.doFlowControl(dimension);
+    }
+
+    public static void  stopCurator(){
+        curatorClient.stopCurator();
+    }
+
+    public static void  startCurator(){
+        curatorClient.startCurator();
     }
 }

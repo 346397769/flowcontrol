@@ -6,11 +6,14 @@ import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.framework.state.ConnectionStateListener;
 import org.apache.curator.retry.*;
+import org.apache.curator.utils.CloseableUtils;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -60,7 +63,6 @@ public class CuratorClient{
 
     //leader选举客户端
     private LeaderSelectorClient leaderSelectorClient = null;
-
 
     /**
      * 删除 flControlBean的维度下面的所有的临时节点，相当于重置为0
@@ -469,10 +471,6 @@ public class CuratorClient{
         return connectZkUrlPort;
     }
 
-    public void setConnectZkUrlPort(String ZkUrlPort) {
-        connectZkUrlPort = ZkUrlPort;
-    }
-
 
     /**
      * 内部类，用来检测连接状态,并在连接自己的节点连接不上的时候，能去连接其他服务器
@@ -482,26 +480,13 @@ public class CuratorClient{
         @Override
         public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
             if (connectionState == ConnectionState.LOST||connectionState == ConnectionState.SUSPENDED){
-                connectToServer.set(false);
-                log.info("连接丢失或挂起，设置连接状态为false，释放leader，开放所有的访问开关...");
-
-                synchronized (getLeaderLock()){
-                    getLeaderLock().notifyAll();
-                }
-
-                //开放所有的访问开关
-                for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
-
-                    flControlBean.setOn();
-
-                    cancelTimerTask(flControlBean.getDimension());
-
-                }
+                closeConnect2Zk();
+                log.info("连接丢失或挂起，设置连接状态为false，释放leader");
             }else if (connectionState == ConnectionState.RECONNECTED || connectionState == ConnectionState.CONNECTED){
                 // 重新连接之后，之前的临时节点将被删除，重新建立一个新的节点
                 // 虽然这里是断开之后重新连接，但是不用对节点进行重新的初始化，因为在set0和add的时候，如果没有相应的临时节点，已经写了基于根节点的自动重建策略
                 connectToServer.set(true);
-                log.info("连接或重新连接成功，设置连接状态为true...");
+                log.info("连接或重新连接成功，设置连接状态为true");
             }
         }
     }
@@ -567,7 +552,7 @@ public class CuratorClient{
                 }else {
                     //此时连接不上zookeeper那么休息一会
                     try {
-                        Thread.sleep(1000);
+                        Thread.sleep(3000);
                     } catch (InterruptedException e) {
                         log.error(e.getMessage(),e);
                         flag = false;
@@ -586,7 +571,7 @@ public class CuratorClient{
         boolean initResult = false;
         try {
 
-            RetryPolicy retryPolicy = new RetryForever(3000);
+            RetryPolicy retryPolicy = new RetryOneTime(3000);
             curatorFramework = CuratorFrameworkFactory.builder().connectString(connectZkUrlPort)
                     .retryPolicy(retryPolicy).namespace(rootPath).connectionTimeoutMs(4000)
                     .build();
@@ -734,6 +719,49 @@ public class CuratorClient{
             return getZkServerCurrentNumLIn(dimensionFlctrlCurrentHashMap.get(dimension));
         }else {
             return -1;
+        }
+    }
+
+    /**
+     * 关闭 对 zookeeper的连接
+     * 删除定时任务
+     */
+    public void  stopCurator(){
+        closeConnect2Zk();
+        List<String> currentThreadDimensions = new ArrayList<String>();
+        for (String s : runningThraedMap.keySet()){
+            currentThreadDimensions.add(s);
+        }
+
+        for (String s : currentThreadDimensions){
+            dimensionFlctrlCurrentHashMap.remove(s);
+            runningThraedMap.get(s).interrupt();
+            runningThraedMap.remove(s);
+        }
+
+        CloseableUtils.closeQuietly(leaderSelectorClient);
+        CloseableUtils.closeQuietly(curatorFramework);
+        log.info("关闭对zookeeper的连接，并删除定时任务，结束正在运行的线程，设置连接状态为false");
+    }
+
+    /**
+     * 连接zk
+     */
+    public void  startCurator(){
+        initConnect();
+    }
+
+    /**
+     * 断开连接时执行的操作
+     */
+    private void closeConnect2Zk(){
+        connectToServer.set(false);
+        //删除定时任务
+        for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
+            cancelTimerTask(flControlBean.getDimension());
+        }
+        synchronized (getLeaderLock()){
+            getLeaderLock().notifyAll();
         }
     }
 }

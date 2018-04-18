@@ -80,7 +80,7 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
     @Override
     public void takeLeadership(CuratorFramework curatorFramework) throws Exception {
 
-        System.out.println("我是leader！");
+        log.info("我是leader！");
         if (curatorFramework.checkExists().forPath("/leaderSelectSuccess") != null){
             curatorFramework.delete().forPath("/leaderSelectSuccess");
         }
@@ -105,8 +105,6 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
         }
 
         curatorFramework.delete().forPath("/leaderSelectSuccess");
-
-        System.out.println("我失去leader了!");
     }
 
     public String getLeaderPath() {
