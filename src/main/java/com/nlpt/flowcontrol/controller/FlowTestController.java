@@ -21,16 +21,18 @@ public class FlowTestController {
     private static final Logger log = LoggerFactory.getLogger(FlowTestController.class);
 //    private static CuratorClient curatorClient;
 //
-//    static {
+    static {
 //        String dateString = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
 //        curatorClient = new CuratorClient("BASE","10.124.134.37:2181",dateString,false);
-//        List<FlControlBean> list = new ArrayList<FlControlBean>();
-////        list.add(new FlControlBean("AOP",500,1000));
-//        list.add(new FlControlBean("CBSS",1000,1000));
-//        list.add(new FlControlBean("TEST",1000,1000*60*60));
-//        curatorClient.initConnect();
-//        curatorClient.initFl(list);
-//    }
+        List<FlControlBean> list = new ArrayList<FlControlBean>();
+        list.add(new FlControlBean("CBSS",1000,1000));
+        list.add(new FlControlBean("TEST",1000,1000*60*60));
+        if (FlowControlUtil.getInitSuccess().get()){
+            FlowControlUtil.initFlNodes(list);
+        }else {
+            log.error("无法连接到zookeeper，初始化连接失败，已关闭连接重试...");
+        }
+    }
 
     @RequestMapping(value = "/flowTest/{dimension}")
     public RspInfo test(@PathVariable("dimension") String dimension){

@@ -403,7 +403,7 @@ public class CuratorClient{
             // 如果某一时刻由于leader不存在，导致只初始化了 dimensionFlctrlCurrentHashMap 而没有创建节点，那么在这里拉齐创建
 
             if (curatorFramework.checkExists().forPath("/"+flControlBean.getDimension()) == null){
-               return;
+                return;
             }
 
             long currentNum = IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath(flControlBean.getMyPath()));
@@ -571,7 +571,7 @@ public class CuratorClient{
         boolean initResult = false;
         try {
 
-            RetryPolicy retryPolicy = new RetryOneTime(3000);
+            RetryPolicy retryPolicy = new RetryForever(3000);
             curatorFramework = CuratorFrameworkFactory.builder().connectString(connectZkUrlPort)
                     .retryPolicy(retryPolicy).namespace(rootPath).connectionTimeoutMs(4000)
                     .build();
@@ -727,41 +727,51 @@ public class CuratorClient{
      * 删除定时任务
      */
     public void  stopCurator(){
-        closeConnect2Zk();
-        List<String> currentThreadDimensions = new ArrayList<String>();
-        for (String s : runningThraedMap.keySet()){
-            currentThreadDimensions.add(s);
+        try{
+            closeConnect2Zk();
+            List<String> currentThreadDimensions = new ArrayList<String>();
+            for (String s : runningThraedMap.keySet()){
+                currentThreadDimensions.add(s);
+            }
+            for (String s : currentThreadDimensions){
+                deleteOneDimension(s);
+            }
+        }catch (Exception e){
+            log.error(e.getMessage(),e);
+        }finally {
+            CloseableUtils.closeQuietly(leaderSelectorClient);
+            CloseableUtils.closeQuietly(curatorFramework);
+            log.info("关闭对zookeeper的连接，并删除定时任务，结束正在运行的线程，设置连接状态为false");
         }
-
-        for (String s : currentThreadDimensions){
-            dimensionFlctrlCurrentHashMap.remove(s);
-            runningThraedMap.get(s).interrupt();
-            runningThraedMap.remove(s);
-        }
-
-        CloseableUtils.closeQuietly(leaderSelectorClient);
-        CloseableUtils.closeQuietly(curatorFramework);
-        log.info("关闭对zookeeper的连接，并删除定时任务，结束正在运行的线程，设置连接状态为false");
     }
 
     /**
      * 连接zk
      */
     public void  startCurator(){
-        initConnect();
+        try{
+            initConnect();
+        }catch (Exception e){
+            log.error(e.getMessage(),e);
+        }
+
     }
 
     /**
      * 断开连接时执行的操作
      */
     private void closeConnect2Zk(){
-        connectToServer.set(false);
-        //删除定时任务
-        for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
-            cancelTimerTask(flControlBean.getDimension());
-        }
-        synchronized (getLeaderLock()){
-            getLeaderLock().notifyAll();
+        try{
+            connectToServer.set(false);
+            //删除定时任务
+            for (FlControlBean flControlBean :dimensionFlctrlCurrentHashMap.values()){
+                cancelTimerTask(flControlBean.getDimension());
+            }
+            synchronized (getLeaderLock()){
+                getLeaderLock().notifyAll();
+            }
+        }catch (Exception e){
+            log.error(e.getMessage(),e);
         }
     }
 }

@@ -9,19 +9,24 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class FlowControlUtil {
     private static CuratorClient curatorClient;
 
+    private static AtomicBoolean initSuccess = new AtomicBoolean(true);
+
     static {
         String dateString = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
-        curatorClient = new CuratorClient("BASE","10.124.134.37:2181",dateString);
-        List<FlControlBean> list = new ArrayList<FlControlBean>();
-//        list.add(new FlControlBean("AOP",500,1000));
-        list.add(new FlControlBean("CBSS",1000,1000));
-        list.add(new FlControlBean("TEST",1000,1000*60*60));
-        curatorClient.initConnect();
-        curatorClient.initFl(list);
+        curatorClient = new CuratorClient("BASE","10.124.134.38:2181",dateString);
+        if (!curatorClient.initConnect()){
+            curatorClient.stopCurator();
+            initSuccess.set(false);
+        }
+    }
+
+    public static AtomicBoolean getInitSuccess() {
+        return initSuccess;
     }
 
     /**
