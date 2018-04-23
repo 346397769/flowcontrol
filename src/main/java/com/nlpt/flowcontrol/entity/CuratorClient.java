@@ -1,5 +1,7 @@
 package com.nlpt.flowcontrol.entity;
 import com.nlpt.flowcontrol.utils.IntLong2BytesUtil;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
@@ -10,10 +12,6 @@ import org.apache.curator.utils.CloseableUtils;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -26,7 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  */
 public class CuratorClient{
-    private static final Logger log = LoggerFactory.getLogger(CuratorClient.class);
+    private static final Log log = LogFactory.getLog(CuratorClient.class);
 
     //要创建的根节点路径  也就是Client使用的namespace
     private String rootPath;
@@ -374,7 +372,7 @@ public class CuratorClient{
             }catch (Exception e) {
                 // 这里报异常的可能是，节点断线，节点被定时任务删除，维度节点由于leader异常消失时进行增加而不存在
                 // 但是这里不需要重建节点，因为在 addMyNum2NodeValue 的时候已经检查重建了
-                log.error("获取节点"+pathes+"数据失败",e.getMessage(),e);
+                log.error("获取节点"+pathes+"数据失败",e);
             }
         }
         return numCount;
@@ -647,7 +645,7 @@ public class CuratorClient{
                 }
             }
         }catch (NullPointerException e){
-            log.error("节点初始化异常，等待拉齐即可",e.getMessage(),e);
+            log.error("节点初始化异常，等待拉齐即可",e);
         }
     }
 

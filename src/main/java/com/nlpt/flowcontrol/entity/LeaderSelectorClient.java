@@ -1,11 +1,11 @@
 package com.nlpt.flowcontrol.entity;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.leader.LeaderSelector;
 import org.apache.curator.framework.recipes.leader.LeaderSelectorListenerAdapter;
 import org.apache.zookeeper.CreateMode;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -22,7 +22,9 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
 
     private String leaderPath;
 
-    private static final Logger log = LoggerFactory.getLogger(LeaderSelectorClient.class);
+    private static final Log log = LogFactory.getLog(LeaderSelectorClient.class);
+
+//    private static final Logger log = LoggerFactory.getLogger(LeaderSelectorClient.class);
 
     public LeaderSelectorClient(CuratorClient curatorClientIn,String path){
 
