@@ -3,31 +3,76 @@ package com.nlpt.flowcontrol.utils;
 import com.nlpt.flowcontrol.entity.CuratorClient;
 import com.nlpt.flowcontrol.entity.FlStatus;
 import com.nlpt.flowcontrol.entity.FlControlBean;
-import org.apache.curator.utils.CloseableUtils;
+import com.nlpt.flowcontrol.entity.ZkServer;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class FlowControlUtil {
+    private static final Log log = LogFactory.getLog(FlowControlUtil.class);
+
+    private static ZkServer zkServer;
+
     private static CuratorClient curatorClient;
 
     private static AtomicBoolean initSuccess = new AtomicBoolean(true);
 
     static {
-        String dateString = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
-        curatorClient = new CuratorClient("BASE","10.124.134.38:2181",dateString);
-        if (!curatorClient.initConnect()){
-            curatorClient.stopCurator();
-            initSuccess.set(false);
+        Properties properties = new Properties();
+        //初始化properties参数
+        InputStream zooInput = ZkServer.class.getResourceAsStream("/conf/zoo.cfg");
+        try {
+            properties.load(zooInput);
+            zooInput.close();
+        } catch (IOException e) {
+            log.error(e.getMessage(),e);
         }
+
+        zkServer = new ZkServer(properties);
+
+
+        String dateString = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
+        curatorClient = new CuratorClient("EMBED","127.0.0.1:2181",dateString);
+        zkServer.startClusterZkServer();
+//        try {
+//            // 等待zk服务端互连
+//            Thread.sleep(15000);
+//        } catch (InterruptedException e) {
+//            e.printStackTrace();
+//        }
+        if (curatorClient.initConnect()){
+            log.info("zookeeper客户端启动成功 啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊");
+        }
+
+
+//            if (zkServer.getZkServerStartStatus()){
+//                log.info("zookeeper服务端启动成功");
+//                if (!curatorClient.initConnect()){
+//                    initSuccess.set(false);
+//                }else {
+//                    log.info("zookeeper客户端启动成功");
+//                }
+//            }
+//            else {
+//                log.error("zookeeper服务端启动失败");
+//                curatorClient.stopCurator();
+//                zkServer.stopZkServer();
+//            }
+
     }
+
 
     public static AtomicBoolean getInitSuccess() {
         return initSuccess;
     }
+
 
     /**
      * 将需要初始化的节点传入，此操作需要在同步内存库的时候去做
@@ -52,6 +97,6 @@ public class FlowControlUtil {
     }
 
     public static void  startCurator(){
-        curatorClient.startCurator();
+        curatorClient.initConnect();
     }
 }

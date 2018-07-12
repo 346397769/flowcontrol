@@ -6,33 +6,68 @@ import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.RetryForever;
 
+import java.util.List;
+
 public class Test {
     public static void main(String[] args) {
         RetryPolicy retryPolicy = new RetryForever(3000);
-        CuratorFramework curatorFramework = CuratorFrameworkFactory.builder().connectString("10.124.134.37:2181")
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.builder().connectString("10.245.31.14:2181")
                 .retryPolicy(retryPolicy).namespace("BASE").connectionTimeoutMs(4000)
                 .build();
 
         curatorFramework.start();
-
-
-        while (true){
-            try {
+        try {
 //                long num =  IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath("/oparty_svc#103#103_S/10.191.31.114218920180326102359850"));
 //
 //                System.out.println(num);
-                if (curatorFramework.checkExists().forPath("/leaderSelectSuccess") != null){
-                    System.out.println("存在");
-                }else {
-                    System.out.println("消失了");
+
+            List<String> list = curatorFramework.getChildren().forPath("/oparty_svc_91710_153289_D");
+            long numCount = 0L;
+            for (String pathes:list) {
+                //加个异常处理，没有这个节点就不要统计了，去统计下一个
+                //getNodeValue 用这个方法
+                try {
+                    numCount = numCount + IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath("/oparty_svc_91710_153289_D/"+pathes));
+                }catch (Exception e) {
+                    // 这里报异常的可能是，节点断线，节点被定时任务删除，维度节点由于leader异常消失时进行增加而不存在
+                    // 但是这里不需要重建节点，因为在 addMyNum2NodeValue 的时候已经检查重建了
+                    // 报异常是正常情况
+//                log.error("获取节点"+pathes+"数据失败",e);
                 }
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            } catch (Exception e) {
-                e.printStackTrace();
             }
+            System.out.println(numCount);
+
+        }  catch (Exception e) {
+            e.printStackTrace();
         }
+
+
+
+//        while (true){
+//            try {
+////                long num =  IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath("/oparty_svc#103#103_S/10.191.31.114218920180326102359850"));
+////
+////                System.out.println(num);
+//
+//                List<String> list = curatorFramework.getChildren().forPath("oparty_svc_91710_153289_D");
+//                long numCount = 0L;
+//                for (String pathes:list) {
+//                    //加个异常处理，没有这个节点就不要统计了，去统计下一个
+//                    //getNodeValue 用这个方法
+//                    try {
+//                        numCount = numCount + getNodeValue("/oparty_svc_91710_153289_D/"+pathes);
+//                    }catch (Exception e) {
+//                        // 这里报异常的可能是，节点断线，节点被定时任务删除，维度节点由于leader异常消失时进行增加而不存在
+//                        // 但是这里不需要重建节点，因为在 addMyNum2NodeValue 的时候已经检查重建了
+//                        // 报异常是正常情况
+////                log.error("获取节点"+pathes+"数据失败",e);
+//                    }
+//                }
+//
+//            }  catch (Exception e) {
+//                e.printStackTrace();
+//            }
+//        }
 
 //        curatorFramework.close();
     }

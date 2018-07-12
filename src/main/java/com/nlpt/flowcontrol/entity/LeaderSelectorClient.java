@@ -5,7 +5,6 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.leader.LeaderSelector;
 import org.apache.curator.framework.recipes.leader.LeaderSelectorListenerAdapter;
-import org.apache.zookeeper.CreateMode;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -23,8 +22,6 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
     private String leaderPath;
 
     private static final Log log = LogFactory.getLog(LeaderSelectorClient.class);
-
-//    private static final Logger log = LoggerFactory.getLogger(LeaderSelectorClient.class);
 
     public LeaderSelectorClient(CuratorClient curatorClientIn,String path){
 
@@ -81,15 +78,9 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
 
     @Override
     public void takeLeadership(CuratorFramework curatorFramework) throws Exception {
-
         log.info("我是leader！");
-        if (curatorFramework.checkExists().forPath("/leaderSelectSuccess") != null){
-            curatorFramework.delete().forPath("/leaderSelectSuccess");
-        }
-
-        if (curatorFramework.checkExists().forPath("/leaderSelectSuccess") == null){
-            curatorFramework.create().withMode(CreateMode.EPHEMERAL).forPath("/leaderSelectSuccess","leaderSelectSuccess".getBytes());
-        }
+        // 将竞选leader的结点的值设置成自定义的表名自己的值 例如：端口+IP
+        curatorFramework.setData().forPath(leaderPath,curatorClient.getMyPath().getBytes());
 
         //给每个维度增加定时任务
         while(true){
@@ -106,7 +97,7 @@ public class LeaderSelectorClient extends LeaderSelectorListenerAdapter implemen
             curatorClient.getLeaderLock().wait();
         }
 
-        curatorFramework.delete().forPath("/leaderSelectSuccess");
+        log.info("我失去了leader！");
     }
 
     public String getLeaderPath() {

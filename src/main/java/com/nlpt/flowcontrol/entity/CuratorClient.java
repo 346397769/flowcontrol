@@ -53,9 +53,6 @@ public class CuratorClient{
     //初始化完节点的标志，以供成为leader之后的定时任务执行
     private AtomicBoolean initNodesDoneFlag = new AtomicBoolean(false);
 
-    //是否是第一次初始化
-    private AtomicBoolean firstInitFlag = new AtomicBoolean(true);
-
     //获取leader时的锁，该锁将会在失去leader时被释放
     private String LeaderLock = "LEADER_LOCK";
 
@@ -113,12 +110,78 @@ public class CuratorClient{
         this.myPath = myPath;
     }
 
+    /**
+     * 增加本地结点
+     * 包括1.增加到本地维度map中  2.创建本地到远程的同步线程,并把它增加到runningThraedMap中进行管理  3.增加定时任务（leader）
+     * @param flControlBean
+     */
+    private void addLocalDimensionNodes(FlControlBean flControlBean){
+        FlControlBean flControlBeanInit = new FlControlBean(flControlBean.getDimension(),flControlBean.getMaxVisitValue(),flControlBean.getFlTimeSpanMS());
+        flControlBeanInit.setMyPath("/"+flControlBeanInit.getDimension()+"/"+myPath);
+        dimensionFlctrlCurrentHashMap.put(flControlBeanInit.getDimension(),flControlBeanInit);
+        //不用添加叶子节点，在请求的时候会自动添加节点
+        Thread ts = new Thread(new DealZkNodes(flControlBean.getDimension()));
+        runningThraedMap.put(flControlBean.getDimension(),ts);
+        ts.start();
+        addTimerTask(flControlBean.getDimension());
+    }
+
+    /**
+     * 删除本地结点
+     * 包括 1.删除本地map 2.停止并删除本地同步线程 3.删除定时任务(leader)
+     * @param dimension
+     */
+    private void deleteLocalDimensionNodes(String dimension){
+        //将需要删除的维度map删除，需要停止的维度线程停止
+        dimensionFlctrlCurrentHashMap.remove(dimension);
+
+        //检查需要被删除的维度的线程有没有停止，没停止的话就删除
+        if (getRunningThraedMap().get(dimension)!=null){
+            if (getRunningThraedMap().get(dimension).getState() != Thread.State.TERMINATED){
+                //提醒该线程需要结束了
+                getRunningThraedMap().get(dimension).interrupt();
+            }
+            //从正在运行的线程map中把它删除
+            getRunningThraedMap().remove(dimension);
+        }
+        cancelTimerTask(dimension);
+    }
+
+    /**
+     * 增加远程结点
+     * @param dimension
+     */
+    private boolean addRemoteDimensionNodes(String dimension){
+        boolean createResult = false;
+        //创建新增的根节点
+        try {
+            if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+dimension) == null && dimensionFlctrlCurrentHashMap.get(dimension) != null){
+                curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/"+dimension,dimension.getBytes());
+                createResult = true;
+            }
+        } catch (Exception e) {
+            log.error(e.getMessage(),e);
+        }
+        return createResult;
+    }
+
+    /**
+     * 删除远程结点
+     * @param dimension
+     */
+    private void deleteRemoteDimensionNodes(String dimension) throws Exception {
+        if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+dimension) != null && dimensionFlctrlCurrentHashMap.get(dimension) == null){
+            curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+dimension);
+        }
+    }
+
 
     /**
      * 初始化zookeeper的节点
      * 并设置初始值
      *
      * 建立维度根节点的策略是：
+     *      以传入维度为基准，更新本地结点和远程结点
      *       已有的维度集合 = listA
      *      传入的维度集合 = listB
      *      需要删除的维度节点 = listA - listB
@@ -126,110 +189,72 @@ public class CuratorClient{
      */
     private void initCuratorNodes(List<FlControlBean> flControlBeans){
         try {
-            // 第一次初始化走这里
-            if (firstInitFlag.get()) {
+            // 更新本地和zk已有结点属性 和 补偿创建线程任务和定时任务
+            updateNodes(flControlBeans);
+            // 获取传入list，zookeeper结点list，本地list
 
-                // 等待leader选举结束再进行第一次初始化，这样能让所有的节点同步
-                while(curatorFramework.checkExists().forPath("/leaderSelectSuccess") == null){
-                    Thread.sleep(1000);
-                }
+            // 本地list
+            List<String> listLocal = new ArrayList<String>();
 
-                // 传入的维度集合
-                List<String> list1 = new ArrayList<String>();
-                //获取已有的List<String>类型的维度集合
-                List<String> list2 = new ArrayList<String>();
+            // zk结点list
+            List<String> listZk = getKidsPathUnderRootIn("/");
+            listZk.remove("leader");
 
-                for (FlControlBean flControlBean : flControlBeans) {
-                    FlControlBean flControlBeanInit = new FlControlBean(flControlBean.getDimension(), flControlBean.getMaxVisitValue(), flControlBean.getFlTimeSpanMS());
-                    flControlBeanInit.setMyPath("/" + flControlBeanInit.getDimension() + "/" + myPath);
-                    dimensionFlctrlCurrentHashMap.put(flControlBeanInit.getDimension(), flControlBeanInit);
-                    initOneNodes(flControlBeanInit.getDimension());
-                    list1.add(flControlBean.getDimension());
-                }
+            // 传入list
+            List<String> listIntro = new ArrayList<String>();
 
-                if (leaderSelectorClient.isLeader()){
-                    list2 = getKidsPathUnderRootIn("/");
-                    //将固定的leader选举节点移除
-                    list2.remove("leader");
-                    list2.remove("leaderSelectSuccess");
-                    list2.removeAll(list1);
-
-                    // 将多余的节点删除掉
-                    // 因为是第一次初始化的时候，所以也没有timerTask 还有为这个维度起的线程，只需要删除节点就可以清理干净了
-                    //而这一项工作也只有leader需要做，其他的节点不需要做
-                    for (String s: list2){
-                        deleteDimensionNode(s);
-                    }
-                }
-
-                firstInitFlag.set(false);
-            }else {
-                //第n次初始化走这里  n > 1
-
-                /*
-                 dimensionFlctrlCurrentHashMap 中的维度的中有但是 远程节点没有的 要创建
-                 某个维度没有定时删除节点的定时任务，那么要创建
-                 之所以会出现这种情况，是因为某一刻leader节点不存在了，但是又新增了节点，这就造成了本地和远程不同步，本地节点多，远程节点少 ，并且没有这个维度的定时任务
-                 */
-
-                //获取已有的List<String>类型的维度
-                List<String> listA = new ArrayList<String>();
-                // 对于没有建立的节点进行补偿建立和timertask的补偿创建 这里之所以灭有加 if (leaderSelectorClient.isLeader())
-                // 是因为listA也需要用这个地方进行已有节点的初始化
-                for (String s : dimensionFlctrlCurrentHashMap.keySet()){
-                    if (curatorFramework.checkExists().forPath("/"+s) == null){
-                        createDimensionNode(s);
-                    }
-                    addTimerTask(s);
-                    listA.add(s);
-                }
-
-                //传入的维度集合
-                List<String> listB = new ArrayList<String>();
-                //初始化维度对应map 和 获取传入的维度的集合
-                //初始化Map的value和key的List，是因为这样用于建立节点等比较方便
-                for (FlControlBean flControlBean:flControlBeans){
-                    listB.add(flControlBean.getDimension());
-                }
-                //首先获取当前根节点下的所有子节点(也就是当前所有维度)的路径，为了跟传入的值进行比较，并对当前根节点下的子节点进行更新操作（增加，或者删减）
-
-                //已有的维度集合的copy
-                List<String> copyListA = new ArrayList<String>(listA);
-
-                //需要删除的维度节点 = listA - listB
-                listA.removeAll(listB);
-
-                //需要新建的节点 = listB - listA
-                listB.removeAll(copyListA);
-
-//                //更新LeaderSelectorClient的Thread
-//                leaderSelectorClient.initSetingZeroThread(listB,listA);
-
-                //删除需要删除的维度节点
-                //如果是第一次进行初始化，那么应该不会有删减操作
-                for (String s : listA){
-                    deleteOneDimension(s);
-                }
-
-                //新增需要增加的维度节点,并为其建立临时统计叶子节点
-                //如果是第一次初始化根节点操作，那么应该是将所有的维度节点进行初始化
-                //但是当建立了此维度之后，其他机器上即使第一次运行也不会走这块代码，除非维度有新增的
-
-                for (String s : listB){
-                    for (FlControlBean flControlBean : flControlBeans){
-                        if (flControlBean.getDimension().equals(s)){
-                            FlControlBean flControlBeanInit = new FlControlBean(flControlBean.getDimension(),flControlBean.getMaxVisitValue(),flControlBean.getFlTimeSpanMS());
-                            //初始化每个维度的临时统计子节点
-                            flControlBeanInit.setMyPath("/"+flControlBeanInit.getDimension()+"/"+myPath);
-                            dimensionFlctrlCurrentHashMap.put(flControlBeanInit.getDimension(),flControlBeanInit);
-                            initOneNodes(s);
-                        }
-                    }
-                }
-
-                updateNodes(flControlBeans);
-
+            // 获取本地list
+            for (String s : dimensionFlctrlCurrentHashMap.keySet()){
+                listLocal.add(s);
             }
+
+            //获取传入list
+            for (FlControlBean flControlBean:flControlBeans){
+                listIntro.add(flControlBean.getDimension());
+            }
+
+            // 分别对三个list做copy 以便下面的计算
+            List<String> copyOfListLocal = new ArrayList<String>(listLocal);
+            List<String> copyOfListZk = new ArrayList<String>(listZk);
+            List<String> copyOfListIntro = new ArrayList<String>(listIntro);
+
+            // 传入list和本地list比较，对本地list进行增删
+            // 本地需要删除的结点
+            listLocal.removeAll(listIntro);
+            // 本地需要增加的结点
+            listIntro.removeAll(copyOfListLocal);
+
+            // 传入list和zookeeper结点比较，对zookeeper结点进行增删
+
+            // zk需要删除的结点
+            listZk.removeAll(copyOfListIntro);
+            // zk需要增加的结点
+            copyOfListIntro.removeAll(copyOfListZk);
+
+            // 更新zk结点
+            // 新增
+            for (String s:copyOfListIntro) {
+                addRemoteDimensionNodes(s);
+            }
+            // 删除
+            for (String s:listZk) {
+                deleteRemoteDimensionNodes(s);
+            }
+
+            // 更新本地结点
+            // 新增
+            for (String s : listIntro) {
+                for (FlControlBean flControlBean:flControlBeans) {
+                    if (flControlBean.getDimension().equals(s)){
+                        addLocalDimensionNodes(flControlBean);
+                    }
+                }
+            }
+            // 删除
+            for (String s:listLocal) {
+                deleteLocalDimensionNodes(s);
+            }
+
 
         } catch (Exception e) {
             log.error(e.getMessage(),e);
@@ -250,78 +275,11 @@ public class CuratorClient{
     }
 
     /**
-     * 删除某一个维度需要的操作
-     * 从 dimensionFlctrlCurrentHashMap 移除
-     * 删除该节点和子节点
-     * 取消正在运行的线程 getRunningThraedMap().get(dimension).interrupt();
-     * 从正在运行的线程中移除  getRunningThraedMap().remove(dimension);
-     * leader节点取消定时任务 cancelTimerTask(dimension);
-     * @param dimension
-     * @throws Exception
-     */
-    private void deleteOneDimension(String dimension) throws Exception {
-        //将需要删除的维度map删除，需要停止的维度线程停止
-        dimensionFlctrlCurrentHashMap.remove(dimension);
-
-        deleteDimensionNode(dimension);
-
-        //检查需要被删除的维度的线程有没有停止，没停止的话就删除
-        if (getRunningThraedMap().get(dimension)!=null){
-            if (getRunningThraedMap().get(dimension).getState() != Thread.State.TERMINATED){
-                //提醒该线程需要结束了
-                getRunningThraedMap().get(dimension).interrupt();
-            }
-            //从正在运行的线程map中把它删除
-            getRunningThraedMap().remove(dimension);
-        }
-
-        cancelTimerTask(dimension);
-    }
-
-    private void initOneNodes(String path) throws Exception {
-        createDimensionNode(path);
-        //不用添加叶子节点，在请求的时候会自动添加节点
-        Thread ts = new Thread(new DealZkNodes(path));
-        runningThraedMap.put(path,ts);
-        ts.start();
-        addTimerTask(path);
-    }
-
-    /**
-     * 创建持久化的维度节点
-     * @param path  维度
-     */
-    private boolean createDimensionNode(String path){
-        boolean createResult = false;
-        //创建新增的根节点
-        try {
-            if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+path) == null && dimensionFlctrlCurrentHashMap.get(path) != null){
-                System.out.println("作为leader创建节点"+path);
-                curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/"+path,path.getBytes());
-                createResult = true;
-            }
-        } catch (Exception e) {
-            log.error(e.getMessage(),e);
-        }
-        return createResult;
-    }
-
-    /**
-     * 删除维度节点
-     * @param dimension 维度
-     */
-    private void deleteDimensionNode(String dimension) throws Exception {
-        if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+dimension) != null && dimensionFlctrlCurrentHashMap.get(dimension) == null){
-            System.out.println("作为leader删除节点"+dimension);
-            curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+dimension);
-        }
-    }
-
-    /**
      * 将传入的List跟已有的维度进行比较
      * 如果有不同，那么根据不同去进行更改
      * 只有可能是MaxVisitValue改变，因为，传入的维度都加了_M,_S,_D,_H等后缀，所以每一种类型的FlTimeSpanMS都是固定的
      * 并将 runningThraedMap  dimensionFlctrlCurrentHashMap 拉齐
+     * 补偿创建master结点的定时任务
      * @param flControlBeans
      */
     private void updateNodes(List<FlControlBean> flControlBeans){
@@ -343,6 +301,8 @@ public class CuratorClient{
                     runningThraedMap.put(flControlBean.getDimension(),ts);
                     ts.start();
                 }
+                // 补偿创建master结点的任务，如果是master并且已经存在此任务，那么就不会创建
+                addTimerTask(flControlBean.getDimension());
             }
         }
     }
@@ -372,7 +332,8 @@ public class CuratorClient{
             }catch (Exception e) {
                 // 这里报异常的可能是，节点断线，节点被定时任务删除，维度节点由于leader异常消失时进行增加而不存在
                 // 但是这里不需要重建节点，因为在 addMyNum2NodeValue 的时候已经检查重建了
-                log.error("获取节点"+pathes+"数据失败",e);
+                // 报异常是正常情况
+//                log.error("获取节点"+pathes+"数据失败",e);
             }
         }
         return numCount;
@@ -566,12 +527,12 @@ public class CuratorClient{
      * @return
      */
     public boolean initConnect(){
-        boolean initResult = false;
+        boolean initResult = true;
         try {
 
             RetryPolicy retryPolicy = new RetryForever(3000);
             curatorFramework = CuratorFrameworkFactory.builder().connectString(connectZkUrlPort)
-                    .retryPolicy(retryPolicy).namespace(rootPath).connectionTimeoutMs(4000)
+                    .retryPolicy(retryPolicy).namespace(rootPath).connectionTimeoutMs(3000)
                     .build();
             //状态监听
             MyConnectionStateListener stateListener = new MyConnectionStateListener();
@@ -583,7 +544,8 @@ public class CuratorClient{
 
             leaderSelectorClient.start();
 
-            initResult = curatorFramework.blockUntilConnected(4500, TimeUnit.MILLISECONDS);
+//            initResult = curatorFramework.blockUntilConnected(4500, TimeUnit.MILLISECONDS);
+            curatorFramework.blockUntilConnected();
         } catch (InterruptedException e) {
             log.error(e.getMessage(),e);
         } catch (Exception e) {
@@ -732,7 +694,7 @@ public class CuratorClient{
                 currentThreadDimensions.add(s);
             }
             for (String s : currentThreadDimensions){
-                deleteOneDimension(s);
+                deleteLocalDimensionNodes(s);
             }
         }catch (Exception e){
             log.error(e.getMessage(),e);
@@ -741,18 +703,6 @@ public class CuratorClient{
             CloseableUtils.closeQuietly(curatorFramework);
             log.info("关闭对zookeeper的连接，并删除定时任务，结束正在运行的线程，设置连接状态为false");
         }
-    }
-
-    /**
-     * 连接zk
-     */
-    public void  startCurator(){
-        try{
-            initConnect();
-        }catch (Exception e){
-            log.error(e.getMessage(),e);
-        }
-
     }
 
     /**
