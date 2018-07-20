@@ -25,22 +25,22 @@ public class FlowControlUtil {
     private static AtomicBoolean initSuccess = new AtomicBoolean(true);
 
     static {
-        Properties properties = new Properties();
-        //初始化properties参数
-        InputStream zooInput = ZkServer.class.getResourceAsStream("/conf/zoo.cfg");
-        try {
-            properties.load(zooInput);
-            zooInput.close();
-        } catch (IOException e) {
-            log.error(e.getMessage(),e);
-        }
-
-        zkServer = new ZkServer(properties);
+//        Properties properties = new Properties();
+//        //初始化properties参数
+//        InputStream zooInput = ZkServer.class.getResourceAsStream("/conf/zoo.cfg");
+//        try {
+//            properties.load(zooInput);
+//            zooInput.close();
+//        } catch (IOException e) {
+//            log.error(e.getMessage(),e);
+//        }
+//
+//        zkServer = new ZkServer(properties);
 
 
         String dateString = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
-        curatorClient = new CuratorClient("EMBED","127.0.0.1:2181",dateString);
-        zkServer.startClusterZkServer();
+        curatorClient = new CuratorClient("EMBED","10.124.164.110:7001",dateString);
+//        zkServer.startClusterZkServer();
 //        try {
 //            // 等待zk服务端互连
 //            Thread.sleep(15000);

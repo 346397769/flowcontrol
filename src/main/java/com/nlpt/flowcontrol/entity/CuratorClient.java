@@ -14,7 +14,6 @@ import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -155,7 +154,7 @@ public class CuratorClient{
         boolean createResult = false;
         //创建新增的根节点
         try {
-            if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+dimension) == null && dimensionFlctrlCurrentHashMap.get(dimension) != null){
+            if (leaderSelectorClient.isLeader()){
                 curatorFramework.create().withMode(CreateMode.PERSISTENT).withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE).forPath("/"+dimension,dimension.getBytes());
                 createResult = true;
             }
@@ -170,7 +169,7 @@ public class CuratorClient{
      * @param dimension
      */
     private void deleteRemoteDimensionNodes(String dimension) throws Exception {
-        if (leaderSelectorClient.isLeader() && curatorFramework.checkExists().forPath("/"+dimension) != null && dimensionFlctrlCurrentHashMap.get(dimension) == null){
+        if (leaderSelectorClient.isLeader()){
             curatorFramework.delete().guaranteed().deletingChildrenIfNeeded().forPath("/"+dimension);
         }
     }
@@ -231,15 +230,6 @@ public class CuratorClient{
             // zk需要增加的结点
             copyOfListIntro.removeAll(copyOfListZk);
 
-            // 更新zk结点
-            // 新增
-            for (String s:copyOfListIntro) {
-                addRemoteDimensionNodes(s);
-            }
-            // 删除
-            for (String s:listZk) {
-                deleteRemoteDimensionNodes(s);
-            }
 
             // 更新本地结点
             // 新增
@@ -253,6 +243,16 @@ public class CuratorClient{
             // 删除
             for (String s:listLocal) {
                 deleteLocalDimensionNodes(s);
+            }
+
+            // 更新zk结点
+            // 新增
+            for (String s:copyOfListIntro) {
+                addRemoteDimensionNodes(s);
+            }
+            // 删除
+            for (String s:listZk) {
+                deleteRemoteDimensionNodes(s);
             }
 
 
@@ -721,5 +721,27 @@ public class CuratorClient{
         }catch (Exception e){
             log.error(e.getMessage(),e);
         }
+    }
+
+    /**
+     * 获取当前所有的维度
+     * @return
+     */
+    public Set<String> getDimensions(){
+        return dimensionFlctrlCurrentHashMap.keySet();
+    }
+
+    /**
+     * 获取当前客户端自建leader结点保存的字符串
+     * @return
+     */
+    public String getLeaderString(){
+        String leaderString = null;
+        try {
+            leaderString = new String(curatorFramework.getData().forPath("leader"));
+        } catch (Exception e) {
+            log.error(e.getMessage(),e);
+        }
+        return leaderString;
     }
 }
