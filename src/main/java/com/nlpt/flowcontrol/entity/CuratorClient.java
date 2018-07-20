@@ -738,7 +738,7 @@ public class CuratorClient{
     public String getLeaderString(){
         String leaderString = null;
         try {
-            leaderString = new String(curatorFramework.getData().forPath("leader"));
+            leaderString = new String(curatorFramework.getData().forPath("/leader"));
         } catch (Exception e) {
             log.error(e.getMessage(),e);
         }

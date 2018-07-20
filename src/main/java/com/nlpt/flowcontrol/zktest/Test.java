@@ -19,10 +19,11 @@ public class Test {
 
         curatorFramework.start();
         try {
-            long a = System.currentTimeMillis();
-            long num =  IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath("/esb_svc_173025_S/10.124.164.110_8001_20180712172707398"));
-            long b = System.currentTimeMillis();
-            System.out.println(b-a);
+//            long a = System.currentTimeMillis();
+//            long num =  IntLong2BytesUtil.bytes2Long(curatorFramework.getData().forPath("/esb_svc_173025_S/10.124.164.110_8001_20180712172707398"));
+//            long b = System.currentTimeMillis();
+//            System.out.println(b-a);
+            System.out.println(new String(curatorFramework.getData().forPath("/leader")));
 //
 //                System.out.println(num);
 
